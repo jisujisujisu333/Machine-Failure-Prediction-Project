@@ -14,7 +14,13 @@ st.set_page_config(
     layout="wide"
 )
 
-DATA_URL = "https://raw.githubusercontent.com/jisujisujisu333/Machine-Failure-Prediction-Project/refs/heads/main/data/%EA%B8%B0%EA%B3%84%EA%B3%A0%EC%9E%A5%EC%98%88%EC%B8%A1%20%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8.csv"
+DATA_URL = (
+    "https://raw.githubusercontent.com/"
+    "jisujisujisu333/Machine-Failure-Prediction-Project/"
+    "refs/heads/main/data/"
+    "%EA%B8%B0%EA%B3%84%EA%B3%A0%EC%9E%A5%EC%98%88%EC%B8%A1"
+    "%20%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8.csv"
+)
 
 st.title("⚙️ 기계 고장 기초통계 분석실")
 st.write(
@@ -28,27 +34,29 @@ st.write(
 # ==========================================
 @st.cache_data
 def load_data():
-    last_error = None
+    errors = []
 
     for encoding in ["utf-8-sig", "utf-8", "cp949"]:
         try:
             data = pd.read_csv(DATA_URL, encoding=encoding)
-            data.columns = [str(col).strip() for col in data.columns]
+            data.columns = [str(c).strip() for c in data.columns]
             return data
         except Exception as error:
-            last_error = error
+            errors.append(f"{encoding}: {error}")
 
-    raise RuntimeError(str(last_error))
+    raise RuntimeError("\n".join(errors))
 
 
 try:
     df = load_data()
 except Exception as error:
     st.error("데이터를 불러오지 못했습니다.")
-    st.write("GitHub 파일 주소와 저장소 공개 여부를 확인해 주세요.")
     st.code(str(error))
+    st.info(
+        "GitHub 저장소가 공개되어 있는지, "
+        "CSV 파일 주소가 올바른지 확인해 주세요."
+    )
     st.stop()
-
 
 if df.empty:
     st.error("CSV 파일에 데이터가 없습니다.")
@@ -56,7 +64,7 @@ if df.empty:
 
 
 # ==========================================
-# 3. 열 이름 자동 인식
+# 3. 열 이름 정리 및 변수 확인
 # ==========================================
 def normalize_name(value):
     value = unicodedata.normalize("NFKC", str(value))
@@ -82,27 +90,30 @@ for col in df.columns:
         break
 
 
-# 수치로 변환 가능한 열은 숫자형으로 변환
+# ==========================================
+# 4. 수치형 변수 자동 변환
+# errors="ignore"는 사용하지 않습니다.
+# ==========================================
 for col in df.columns:
-    converted = pd.to_numeric(df[col], errors="coerce")
-    original_count = df[col].notna().sum()
+    original = df[col]
 
-    if original_count > 0:
-        numeric_ratio = converted.notna().sum() / original_count
+    # 전부 비어 있는 열은 그대로 둡니다.
+    if original.notna().sum() == 0:
+        continue
 
-        if numeric_ratio >= 0.8:
-            df[col] = converted
+    converted = pd.to_numeric(original, errors="coerce")
 
+    original_count = original.notna().sum()
+    numeric_count = converted.notna().sum()
+    numeric_ratio = numeric_count / original_count
 
-# 고장 여부 열의 숫자형 변환 결과를 반영
-if target_col is not None:
-    df[target_col] = pd.to_numeric(
-        df[target_col], errors="ignore"
-    )
+    # 값의 80% 이상이 숫자로 변환될 때만 수치형으로 처리합니다.
+    if numeric_ratio >= 0.8:
+        df[col] = converted
 
 
 # ==========================================
-# 4. 데이터 요약
+# 5. 데이터 한눈에 보기
 # ==========================================
 st.subheader("📌 데이터 한눈에 보기")
 
@@ -110,14 +121,12 @@ numeric_cols = df.select_dtypes(
     include="number"
 ).columns.tolist()
 
-missing_total = int(df.isna().sum().sum())
-
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("전체 데이터", f"{len(df):,}행")
 col2.metric("전체 변수", f"{len(df.columns):,}개")
 col3.metric("수치형 변수", f"{len(numeric_cols):,}개")
-col4.metric("결측값", f"{missing_total:,}개")
+col4.metric("결측값", f"{int(df.isna().sum().sum()):,}개")
 
 with st.expander("📖 데이터 열 이름과 미리 보기"):
     st.write("실제 CSV의 열 이름")
@@ -126,12 +135,12 @@ with st.expander("📖 데이터 열 이름과 미리 보기"):
 
 
 # ==========================================
-# 5. 기초통계량
+# 6. 기초통계량
 # ==========================================
 st.divider()
 st.subheader("1. 📊 수치형 변수의 기초통계")
 
-if len(numeric_cols) > 0:
+if numeric_cols:
     stats = df[numeric_cols].describe().T
 
     stats = stats.rename(
@@ -147,10 +156,7 @@ if len(numeric_cols) > 0:
         }
     )
 
-    st.dataframe(
-        stats.round(2),
-        use_container_width=True
-    )
+    st.dataframe(stats.round(2), use_container_width=True)
 
     stat_col = st.selectbox(
         "분포를 확인할 변수를 선택하세요.",
@@ -158,11 +164,11 @@ if len(numeric_cols) > 0:
         key="stat_col"
     )
 
-    hist_df = df[[stat_col]].dropna()
+    hist_data = df[stat_col].dropna()
 
-    if not hist_df.empty:
+    if not hist_data.empty:
         fig_hist = px.histogram(
-            hist_df,
+            df,
             x=stat_col,
             nbins=30,
             title=f"{stat_col}의 분포",
@@ -177,16 +183,15 @@ if len(numeric_cols) > 0:
             yaxis_title="자료 수"
         )
 
-        st.plotly_chart(
-            fig_hist,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("선택한 변수에 분석할 값이 없습니다.")
 else:
     st.warning("분석할 수 있는 수치형 변수가 없습니다.")
 
 
 # ==========================================
-# 6. 범주형 변수 분석
+# 7. 범주형 변수 분석
 # ==========================================
 st.divider()
 st.subheader("2. 🧩 범주형 변수의 분포")
@@ -232,25 +237,26 @@ if categorical_cols:
         showlegend=False
     )
 
-    st.plotly_chart(
-        fig_cat,
-        use_container_width=True
-    )
+    st.plotly_chart(fig_cat, use_container_width=True)
 else:
     st.info("분석할 범주형 변수가 없습니다.")
 
 
 # ==========================================
-# 7. 고장 여부 분석
+# 8. 고장 여부 분석
 # ==========================================
 st.divider()
 st.subheader("3. 🔧 고장 여부 분석")
 
 if target_col is not None:
-    st.write(f"고장 여부 변수: `{target_col}`")
+    st.write(f"고장 여부 변수: {target_col}")
 
-    target_data = df[target_col].copy()
-    target_data = target_data.astype("string").fillna("결측값")
+    # 원본 값의 형태를 유지하여 문자형 고장 여부도 처리합니다.
+    target_data = (
+        df[target_col]
+        .astype("string")
+        .fillna("결측값")
+    )
 
     target_counts = (
         target_data.value_counts()
@@ -276,10 +282,7 @@ if target_col is not None:
             showlegend=False
         )
 
-        st.plotly_chart(
-            fig_target,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_target, use_container_width=True)
 
     with right:
         fig_pie = px.pie(
@@ -291,13 +294,9 @@ if target_col is not None:
         )
 
         fig_pie.update_layout(height=380)
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-        st.plotly_chart(
-            fig_pie,
-            use_container_width=True
-        )
-
-    # 고장 여부에 따른 평균 비교
+    # 고장 여부별 수치형 변수 평균 비교
     compare_cols = [
         col for col in numeric_cols
         if col != target_col
@@ -317,17 +316,13 @@ if target_col is not None:
             "측정값": df[compare_col]
         })
 
-        compare_df = compare_df.dropna(
-            subset=["측정값"]
-        )
+        compare_df = compare_df.dropna(subset=["측정값"])
 
         mean_df = (
             compare_df.groupby("고장 여부", as_index=False)
-            ["측정값"].mean()
-        )
-
-        mean_df = mean_df.rename(
-            columns={"측정값": "평균"}
+            ["측정값"]
+            .mean()
+            .rename(columns={"측정값": "평균"})
         )
 
         fig_mean = px.bar(
@@ -350,43 +345,38 @@ if target_col is not None:
             showlegend=False
         )
 
-        st.plotly_chart(
-            fig_mean,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_mean, use_container_width=True)
+    else:
+        st.info("평균을 비교할 다른 수치형 변수가 없습니다.")
 
 else:
     st.warning(
         "고장 여부 열을 자동으로 찾지 못했습니다. "
-        "아래 실제 열 이름을 확인해 주세요."
+        "실제 열 이름을 확인해 주세요."
     )
-    st.write(list(df.columns))
+    st.write("현재 열 이름:", list(df.columns))
 
 
 # ==========================================
-# 8. 상관관계 분석
+# 9. 상관관계 분석
 # ==========================================
 st.divider()
 st.subheader("4. 🔗 변수 사이의 상관관계")
 
-# 식별번호는 상관관계 분석에서 제외
-id_words = [
+id_words = {
     "udi",
     "productid",
     "id",
     "일련번호",
     "식별번호"
-]
+}
 
 corr_cols = []
 
 for col in numeric_cols:
     normalized = normalize_name(col)
 
-    if any(
-        normalized == word
-        for word in id_words
-    ):
+    if normalized in id_words:
         continue
 
     if df[col].nunique(dropna=True) > 1:
@@ -410,24 +400,21 @@ if len(corr_cols) >= 2:
         height=max(450, len(corr_cols) * 45)
     )
 
-    st.plotly_chart(
-        fig_corr,
-        use_container_width=True
-    )
+    st.plotly_chart(fig_corr, use_container_width=True)
 
     st.caption(
-        "상관계수는 두 수치형 변수의 선형적인 관계를 나타냅니다. "
+        "상관계수는 두 변수 사이의 선형적인 관계를 나타냅니다. "
         "상관관계만으로 직접적인 원인을 단정할 수 없습니다."
     )
 else:
     st.info(
-        "상관관계를 분석하려면 값이 서로 다른 "
-        "수치형 변수가 2개 이상 필요합니다."
+        "상관관계 분석에는 값이 서로 다른 수치형 변수가 "
+        "2개 이상 필요합니다."
     )
 
 
 # ==========================================
-# 9. 결측값 분석
+# 10. 결측값 분석
 # ==========================================
 st.divider()
 st.subheader("5. 🧹 결측값 확인")
@@ -440,10 +427,7 @@ missing_df = (
 
 missing_df = missing_df[
     missing_df["결측값 수"] > 0
-].sort_values(
-    "결측값 수",
-    ascending=False
-)
+].sort_values("결측값 수", ascending=False)
 
 if missing_df.empty:
     st.success("결측값이 없습니다.")
@@ -452,10 +436,7 @@ else:
         missing_df["결측값 수"] / len(df) * 100
     ).round(2)
 
-    st.dataframe(
-        missing_df,
-        use_container_width=True
-    )
+    st.dataframe(missing_df, use_container_width=True)
 
     fig_missing = px.bar(
         missing_df,
@@ -472,18 +453,14 @@ else:
         height=380
     )
 
-    st.plotly_chart(
-        fig_missing,
-        use_container_width=True
-    )
+    st.plotly_chart(fig_missing, use_container_width=True)
 
 
 # ==========================================
-# 10. 마무리
+# 11. 분석 질문
 # ==========================================
 st.divider()
-
-st.subheader("📝 분석할 때 생각해 볼 질문")
+st.subheader("📝 분석해 볼 질문")
 
 st.markdown(
     """
@@ -495,7 +472,6 @@ st.markdown(
 )
 
 st.caption(
-    "이 앱은 기초통계와 탐색적 데이터 분석을 위한 도구입니다. "
-    "분석 결과는 데이터에 나타난 관계를 보여 주며, "
-    "고장의 직접적인 원인을 확정하는 것은 아닙니다."
+    "이 앱은 기초통계 및 탐색적 데이터 분석을 위한 도구입니다. "
+    "관찰된 관계만으로 고장의 직접적인 원인을 확정할 수는 없습니다."
 )
