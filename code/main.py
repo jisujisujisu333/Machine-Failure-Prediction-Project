@@ -2,6 +2,7 @@
 # --------------------------------
 # 원하는 변수 2개로 기계 고장률 분석
 # --------------------------------
+
 st.divider()
 st.header("🔍 원하는 변수로 기계 고장률 분석")
 
@@ -10,7 +11,7 @@ st.write(
     "각 조건에 따른 기계 고장률을 퍼센트(%)로 비교합니다."
 )
 
-# 분석에 사용할 숫자형 변수
+# 1. 분석에 사용할 숫자형 변수
 numeric_columns = [
     "공기 온도(K)",
     "공정 온도(K)",
@@ -25,6 +26,7 @@ numeric_columns = [
     if col in df.columns
 ]
 
+# 필요한 변수 확인
 if (
     "제품 유형" not in df.columns
     or "기계 고장 여부" not in df.columns
@@ -33,8 +35,9 @@ if (
     st.warning("분석에 필요한 변수가 데이터에 없습니다.")
 
 else:
+
     # --------------------------------
-    # 1. 변수 선택
+    # 2. 변수 선택
     # --------------------------------
     col1, col2, col3 = st.columns(3)
 
@@ -63,7 +66,7 @@ else:
         )
 
     # --------------------------------
-    # 2. 선택한 제품 유형으로 데이터 분리
+    # 3. 선택한 제품 유형으로 데이터 분리
     # --------------------------------
     analysis_df = df.copy()
 
@@ -71,6 +74,12 @@ else:
         analysis_df = analysis_df[
             analysis_df["제품 유형"] == selected_type
         ].copy()
+
+    # 고장 여부를 숫자로 변환
+    analysis_df["기계 고장 여부"] = pd.to_numeric(
+        analysis_df["기계 고장 여부"],
+        errors="coerce"
+    )
 
     st.subheader("📊 분석 대상 데이터")
 
@@ -80,74 +89,99 @@ else:
     )
 
     # --------------------------------
-    # 3. 고장률 계산 함수
+    # 4. 고장률 계산 함수
     # --------------------------------
     def calculate_failure_rate(data, variable):
 
         temp = data[
             [variable, "기계 고장 여부"]
-        ].dropna().copy()
+        ].copy()
+
+        # 결측값 제거
+        temp = temp.dropna()
 
         if len(temp) < 2:
             return None
 
-        # 선택한 변수의 중앙값 계산
-        median_value = temp[variable].median()
-
-        # 중앙값을 기준으로 낮은 그룹과 높은 그룹 분리
-        temp["구분"] = temp[variable].apply(
-            lambda x: "낮은 그룹" if x <= median_value
-            else "높은 그룹"
+        # 숫자형 데이터로 변환
+        temp[variable] = pd.to_numeric(
+            temp[variable],
+            errors="coerce"
         )
 
-        # 각 그룹의 고장률 계산
+        temp = temp.dropna()
+
+        if len(temp) < 2:
+            return None
+
+        # 중앙값 계산
+        median_value = temp[variable].median()
+
+        # 낮은 그룹과 높은 그룹 구분
+        temp["구분"] = "낮은 그룹"
+
+        temp.loc[
+            temp[variable] > median_value,
+            "구분"
+        ] = "높은 그룹"
+
+        # 그룹별 고장률 계산
         result = temp.groupby("구분").agg(
             전체_개수=("기계 고장 여부", "count"),
             고장_개수=("기계 고장 여부", "sum")
         )
 
+        # 고장률 계산
         result["고장률(%)"] = (
-            result["고장_개수"] / result["전체_개수"] * 100
+            result["고장_개수"]
+            / result["전체_개수"]
+            * 100
         )
 
-        result["변수"] = variable
         result["중앙값"] = median_value
 
         return result.reset_index()
 
     # --------------------------------
-    # 4. 두 변수의 고장률 계산
+    # 5. 두 변수의 고장률 계산
     # --------------------------------
     result1 = calculate_failure_rate(
-        analysis_df, variable1
+        analysis_df,
+        variable1
     )
 
     result2 = calculate_failure_rate(
-        analysis_df, variable2
+        analysis_df,
+        variable2
     )
 
     # --------------------------------
-    # 5. 결과 표시
+    # 6. 결과 표시
     # --------------------------------
     st.divider()
     st.subheader("📈 변수별 기계 고장률 비교")
 
-    for variable, result in [
+    results = [
         (variable1, result1),
         (variable2, result2)
-    ]:
+    ]
 
-        st.markdown(f"### {variable}")
+    for variable, result in results:
+
+        st.markdown("### " + variable)
 
         if result is None or result.empty:
-            st.warning("분석할 데이터가 부족합니다.")
+            st.warning(
+                "분석할 데이터가 부족합니다."
+            )
             continue
 
         # 중앙값 안내
         median_value = result["중앙값"].iloc[0]
 
         st.info(
-            f"분석 기준 중앙값: {median_value:,.2f}"
+            "분석 기준 중앙값: "
+            + format(median_value, ",.2f")
         )
 
         # 결과 그래프
@@ -158,12 +192,18 @@ else:
         st.bar_chart(
             chart_data,
             y="고장률(%)",
+            y_label="고장률(%)",
             color="#2997E5"
         )
 
-        # 고장률 결과 표
+        # 결과 표
         display_result = result[
-            ["구분", "전체_개수", "고장_개수", "고장률(%)"]
+            [
+                "구분",
+                "전체_개수",
+                "고장_개수",
+                "고장률(%)"
+            ]
         ].copy()
 
         display_result.columns = [
@@ -183,22 +223,46 @@ else:
             hide_index=True
         )
 
-        # 가장 높은 고장률 설명
+        # --------------------------------
+        # 7. 분석 결과 설명
+        # --------------------------------
         if len(result) == 2:
-            high_rate = result.loc[
-                result["고장률(%)"].idxmax()
+
+            highest_index = result[
+                "고장률(%)"
+            ].idxmax()
+
+            highest_group = result.loc[
+                highest_index
             ]
 
+            group_name = highest_group["구분"]
+            failure_rate = highest_group["고장률(%)"]
+
             st.write(
-                f"**분석 결과:** {high_rate['구분']}의 "
-                f"고장률이 {high_rate['고장률(%)']:.2f}%로 "
-                f더 높게 나타났습니다."
+                "**분석 결과:** "
+                + str(group_name)
+                + "의 고장률이 "
+                + str(round(failure_rate, 2))
+                + "%로 더 높게 나타났습니다."
+            )
+
+        elif len(result) == 1:
+
+            st.warning(
+                "두 그룹으로 나눌 수 없어 "
+                "고장률 비교가 어렵습니다."
             )
 
         st.divider()
 
+    # --------------------------------
+    # 8. 분석 안내
+    # --------------------------------
     st.caption(
-        "※ 낮은 그룹과 높은 그룹은 선택한 제품 유형 내 변수의 중앙값을 기준으로 구분합니다. "
+        "※ 낮은 그룹과 높은 그룹은 선택한 변수의 중앙값을 기준으로 구분합니다. "
+        "중앙값과 같은 값은 낮은 그룹에 포함됩니다. "
         "고장률은 각 그룹의 고장 기계 수를 전체 기계 수로 나누어 계산합니다. "
-        "이 결과는 관련성을 보여주며 직접적인 원인을 증명하지는 않습니다."
+        "분석 결과는 변수와 고장 여부의 관련성을 보여주며, "
+        "직접적인 원인을 증명하지는 않습니다."
     )
