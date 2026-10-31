@@ -37,6 +37,7 @@ def load_data():
             return pd.read_csv(DATA_URL, encoding=encoding)
         except UnicodeDecodeError:
             continue
+
     return pd.read_csv(DATA_URL)
 
 
@@ -72,7 +73,7 @@ df = df.rename(columns=rename_dict)
 
 
 # ==========================================
-# 4. 변수 설명
+# 4. 변수 설명 및 숫자형 변환
 # ==========================================
 variable_meanings = {
     "제품 유형": "제품의 종류입니다. L, M, H 세 가지로 구분됩니다.",
@@ -89,7 +90,6 @@ variable_meanings = {
     "무작위 고장": "무작위 고장 유형으로 기록된 경우입니다."
 }
 
-# 숫자형 변수 변환
 numeric_columns = [
     "공기 온도(K)",
     "공정 온도(K)",
@@ -119,7 +119,10 @@ col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("전체 데이터", f"{len(df):,}개")
 col2.metric("전체 변수", f"{len(df.columns)}개")
-col3.metric("수치형 변수", f"{len(df.select_dtypes(include='number').columns)}개")
+col3.metric(
+    "수치형 변수",
+    f"{len(df.select_dtypes(include='number').columns)}개"
+)
 col4.metric("결측값", f"{df.isnull().sum().sum():,}개")
 
 with st.expander("📋 데이터 미리 보기"):
@@ -193,10 +196,9 @@ if "제품 유형" in df.columns:
         df["제품 유형"]
         .value_counts()
         .reindex(["L", "M", "H"], fill_value=0)
-        .reset_index()
+        .rename_axis("제품 유형")
+        .reset_index(name="데이터 개수")
     )
-
-    type_count.columns = ["제품 유형", "데이터 개수"]
 
     fig = px.bar(
         type_count,
@@ -206,7 +208,9 @@ if "제품 유형" in df.columns:
         text="데이터 개수",
         title="제품 유형별 데이터 개수",
         color_discrete_sequence=[
-            "#1675D1", "#81C4F7", "#FF4545"
+            "#1675D1",
+            "#81C4F7",
+            "#FF4545"
         ]
     )
 
@@ -217,7 +221,12 @@ if "제품 유형" in df.columns:
     )
 
     st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(type_count, use_container_width=True, hide_index=True)
+
+    st.dataframe(
+        type_count,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # ==========================================
@@ -238,12 +247,21 @@ if "기계 고장 여부" in df.columns:
 
     if total_count > 0:
 
-        failure_rate = failure_count.loc[1] / total_count * 100
+        failure_rate = (
+            failure_count.loc[1] / total_count * 100
+        )
 
         col1, col2 = st.columns(2)
 
-        col1.metric("정상 기계", f"{failure_count.loc[0]:,}개")
-        col2.metric("전체 기계 고장률", f"{failure_rate:.2f}%")
+        col1.metric(
+            "정상 기계",
+            f"{failure_count.loc[0]:,}개"
+        )
+
+        col2.metric(
+            "전체 기계 고장률",
+            f"{failure_rate:.2f}%"
+        )
 
         failure_result = pd.DataFrame({
             "구분": ["정상", "고장"],
@@ -258,7 +276,17 @@ if "기계 고장 여부" in df.columns:
             names="구분",
             values="데이터 개수",
             title="정상 및 고장 기계 비율",
-            hole=0.4
+            hole=0.4,
+            color="구분",
+            color_discrete_map={
+                "정상": "#69BCEB",
+                "고장": "#F15B68"
+            }
+        )
+
+        fig.update_traces(
+            textposition="inside",
+            textinfo="label+percent"
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -320,8 +348,8 @@ if len(corr_columns) >= 2:
         )
 
         st.caption(
-            "상관계수가 높다고 해서 해당 변수가 고장의 직접적인 원인이라는 "
-            "뜻은 아닙니다."
+            "상관계수가 높다고 해서 해당 변수가 고장의 "
+            "직접적인 원인이라는 뜻은 아닙니다."
         )
 
 
@@ -341,8 +369,11 @@ missing_df = missing_df[
 ]
 
 if missing_df.empty:
+
     st.success("결측값이 없습니다.")
+
 else:
+
     missing_df = missing_df.sort_values(
         "결측값 개수",
         ascending=False
@@ -374,7 +405,7 @@ st.header("🔍 원하는 변수로 기계 고장률 분석")
 
 st.write(
     "제품 유형과 숫자형 변수 2개를 선택하면 "
-    "각 조건에 따른 기계 고장률을 퍼센트(%)로 비교합니다."
+    "각 조건에 따른 정상·고장 비율을 원그래프로 비교합니다."
 )
 
 analysis_variables = [
@@ -395,6 +426,7 @@ if (
     or "기계 고장 여부" not in df.columns
     or len(analysis_variables) < 2
 ):
+
     st.warning("분석에 필요한 변수가 데이터에 없습니다.")
 
 else:
@@ -437,6 +469,7 @@ else:
     analysis_df = df.copy()
 
     if selected_type != "전체":
+
         analysis_df = analysis_df[
             analysis_df["제품 유형"] == selected_type
         ].copy()
@@ -449,7 +482,7 @@ else:
     )
 
     # --------------------------------
-    # 3. 고장률 계산 함수
+    # 3. 변수별 고장률 계산 함수
     # --------------------------------
     def calculate_failure_rate(data, variable):
 
@@ -475,88 +508,176 @@ else:
         median_value = temp[variable].median()
 
         temp["구분"] = temp[variable].apply(
-            lambda x: "낮은 그룹" if x <= median_value else "높은 그룹"
+            lambda x: "낮은 그룹"
+            if x <= median_value
+            else "높은 그룹"
         )
 
         result = temp.groupby("구분").agg(
             전체_개수=("기계 고장 여부", "count"),
             고장_개수=("기계 고장 여부", "sum")
-        ).reset_index()
-
-        result["고장률(%)"] = (
-            result["고장_개수"] / result["전체_개수"] * 100
         )
 
-        return result, median_value
+        result["정상_개수"] = (
+            result["전체_개수"] - result["고장_개수"]
+        )
+
+        result["고장률(%)"] = (
+            result["고장_개수"]
+            / result["전체_개수"] * 100
+        )
+
+        result = result.reindex(
+            ["낮은 그룹", "높은 그룹"]
+        ).dropna(subset=["전체_개수"])
+
+        return result.reset_index(), median_value
 
     # --------------------------------
     # 4. 두 변수의 고장률 계산
     # --------------------------------
     result1, median1 = calculate_failure_rate(
-        analysis_df, variable1
+        analysis_df,
+        variable1
     )
 
     result2, median2 = calculate_failure_rate(
-        analysis_df, variable2
+        analysis_df,
+        variable2
     )
 
     # --------------------------------
-    # 5. 결과 표시
+    # 5. 원그래프 표시 함수
     # --------------------------------
-    st.divider()
-    st.subheader("📈 변수별 기계 고장률 비교")
+    def show_failure_pies(variable, result, median_value):
 
-    results = [
-        (variable1, result1, median1),
-        (variable2, result2, median2)
-    ]
-
-    for variable, result, median_value in results:
-
-        st.markdown(f"### {variable}")
+        st.markdown(f"### 📌 {variable}")
 
         if result is None or result.empty:
+
             st.warning("분석할 데이터가 부족합니다.")
-            continue
+            return
 
         st.info(
-            f"분석 기준 중앙값: {median_value:,.2f}"
+            f"분석 기준 중앙값: {median_value:,.2f} "
+            "이하를 낮은 그룹, 초과를 높은 그룹으로 구분했습니다."
         )
 
-        # 고장률 그래프
-        fig = px.bar(
-            result,
-            x="구분",
-            y="고장률(%)",
-            color="구분",
-            text="고장률(%)",
-            title=f"{variable}에 따른 기계 고장률",
-            color_discrete_sequence=["#2997E5", "#F28E2B"]
-        )
+        # 낮은 그룹과 높은 그룹을 나란히 표시
+        pie_col1, pie_col2 = st.columns(2)
 
-        fig.update_traces(
-            texttemplate="%{text:.2f}%",
-            textposition="outside"
-        )
+        group_columns = [
+            ("낮은 그룹", pie_col1),
+            ("높은 그룹", pie_col2)
+        ]
 
-        fig.update_layout(
-            template="plotly_white",
-            height=400,
-            xaxis_title="변수 구분",
-            yaxis_title="기계 고장률(%)",
-            showlegend=False
-        )
+        for group_name, column in group_columns:
 
-        st.plotly_chart(fig, use_container_width=True)
+            group_row = result[
+                result["구분"] == group_name
+            ]
 
-        # 결과 표
+            with column:
+
+                st.markdown(f"#### {group_name}")
+
+                if group_row.empty:
+
+                    st.warning("해당 그룹에 데이터가 없습니다.")
+                    continue
+
+                row = group_row.iloc[0]
+
+                pie_data = pd.DataFrame({
+                    "상태": ["정상", "고장"],
+                    "기계 수": [
+                        int(row["정상_개수"]),
+                        int(row["고장_개수"])
+                    ]
+                })
+
+                fig = px.pie(
+                    pie_data,
+                    names="상태",
+                    values="기계 수",
+                    hole=0.45,
+                    color="상태",
+                    color_discrete_map={
+                        "정상": "#69BCEB",
+                        "고장": "#F15B68"
+                    }
+                )
+
+                fig.update_traces(
+                    textposition="inside",
+                    textinfo="label+percent",
+                    hovertemplate=(
+                        "%{label}<br>"
+                        "기계 수: %{value:,}개<br>"
+                        "비율: %{percent}<extra></extra>"
+                    ),
+                    marker=dict(
+                        line=dict(
+                            color="white",
+                            width=2
+                        )
+                    )
+                )
+
+                fig.update_layout(
+                    template="plotly_white",
+                    height=330,
+                    margin=dict(
+                        l=10,
+                        r=10,
+                        t=20,
+                        b=10
+                    ),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.12,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key=f"pie_{variable}_{group_name}"
+                )
+
+                st.metric(
+                    f"{group_name} 고장률",
+                    f"{row['고장률(%)']:.2f}%"
+                )
+
+                st.caption(
+                    f"전체 {int(row['전체_개수']):,}개 중 "
+                    f"고장 {int(row['고장_개수']):,}개"
+                )
+
+        # --------------------------------
+        # 6. 그룹별 상세 결과표
+        # --------------------------------
+        st.markdown("#### 📋 그룹별 상세 결과")
+
         display_result = result[
-            ["구분", "전체_개수", "고장_개수", "고장률(%)"]
+            [
+                "구분",
+                "전체_개수",
+                "정상_개수",
+                "고장_개수",
+                "고장률(%)"
+            ]
         ].copy()
 
         display_result.columns = [
             "변수 구분",
             "전체 기계 수",
+            "정상 기계 수",
             "고장 기계 수",
             "고장률(%)"
         ]
@@ -571,7 +692,9 @@ else:
             hide_index=True
         )
 
-        # 가장 높은 고장률 설명
+        # --------------------------------
+        # 7. 그룹 간 고장률 차이 설명
+        # --------------------------------
         if len(result) == 2:
 
             high_rate = result.loc[
@@ -587,22 +710,36 @@ else:
                 - low_rate["고장률(%)"]
             )
 
-            st.write(
-                f"**분석 결과:** {high_rate['구분']}의 고장률이 "
-                f"{high_rate['고장률(%)']:.2f}%로 더 높게 나타났습니다."
+            st.success(
+                f"{high_rate['구분']}의 고장률이 "
+                f"{high_rate['고장률(%)']:.2f}%로 더 높습니다. "
+                f"두 그룹의 차이는 {difference:.2f}%p입니다."
             )
 
-            st.info(
-                f"두 그룹의 고장률 차이는 {difference:.2f}%p입니다."
-            )
+        st.caption(
+            "원그래프는 각 그룹 안에서 정상 기계와 고장 기계가 "
+            "차지하는 비율을 보여줍니다. "
+            "고장률은 해당 그룹의 전체 기계 중 고장 기계의 비율입니다."
+        )
 
-        st.divider()
+    # --------------------------------
+    # 8. 두 변수 분석 결과 출력
+    # --------------------------------
+    st.divider()
+    st.subheader("📈 변수별 기계 고장률 비교")
 
-    st.caption(
-        "※ 낮은 그룹과 높은 그룹은 선택한 변수의 중앙값을 기준으로 구분합니다. "
-        "중앙값과 같은 값은 낮은 그룹에 포함됩니다. "
-        "고장률은 각 그룹의 고장 기계 수를 전체 기계 수로 나누어 계산합니다. "
-        "이 결과는 관련성을 보여주며 직접적인 원인을 증명하지는 않습니다."
+    show_failure_pies(
+        variable1,
+        result1,
+        median1
+    )
+
+    st.divider()
+
+    show_failure_pies(
+        variable2,
+        result2,
+        median2
     )
 
 
