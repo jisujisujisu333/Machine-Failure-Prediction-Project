@@ -1,12 +1,24 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# --------------------------------------------------
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score,
+    f1_score, confusion_matrix
+)
+
+# ==========================================
 # 기본 설정
-# --------------------------------------------------
+# ==========================================
 st.set_page_config(
-    page_title="기계 고장 기초통계 분석실",
+    page_title="기계 고장 예측 분석실",
     page_icon="⚙️",
     layout="wide"
 )
@@ -14,9 +26,9 @@ st.set_page_config(
 DATA_URL = "https://raw.githubusercontent.com/jisujisujisu333/Machine-Failure-Prediction-Project/refs/heads/main/data/%EA%B8%B0%EA%B3%84%EA%B3%A0%EC%9E%A5%EC%98%88%EC%B8%A1%20%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8.csv"
 
 
-# --------------------------------------------------
+# ==========================================
 # 데이터 불러오기
-# --------------------------------------------------
+# ==========================================
 @st.cache_data
 def load_data():
     for encoding in ["utf-8-sig", "utf-8", "cp949"]:
@@ -30,13 +42,13 @@ def load_data():
 try:
     df = load_data()
 except Exception as e:
-    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
+    st.error(f"데이터를 불러오지 못했습니다: {e}")
     st.stop()
 
 
-# --------------------------------------------------
-# 데이터 전처리
-# --------------------------------------------------
+# ==========================================
+# 기본 전처리
+# ==========================================
 rename_dict = {
     "UDI": "데이터 번호",
     "Product ID": "제품 번호",
@@ -53,439 +65,751 @@ rename_dict = {
     "OSF": "과부하 고장",
     "RNF": "무작위 고장"
 }
-df = df.rename(columns=rename_dict)
 
-numeric_cols = [
-    "공기 온도(K)", "공정 온도(K)", "회전 속도(rpm)",
-    "토크(N·m)", "공구 마모 시간(분)", "기계 고장 여부",
-    "공구 마모 고장", "열 방출 고장", "동력 고장",
-    "과부하 고장", "무작위 고장"
+df = df.rename(columns=rename_dict).copy()
+
+basic_cols = [
+    "공기 온도(K)",
+    "공정 온도(K)",
+    "회전 속도(rpm)",
+    "토크(N·m)",
+    "공구 마모 시간(분)"
+]
+
+numeric_cols = basic_cols + [
+    "기계 고장 여부",
+    "공구 마모 고장",
+    "열 방출 고장",
+    "동력 고장",
+    "과부하 고장",
+    "무작위 고장"
 ]
 
 for col in numeric_cols:
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-basic_cols = [
-    "공기 온도(K)", "공정 온도(K)", "회전 속도(rpm)",
-    "토크(N·m)", "공구 마모 시간(분)"
-]
-available_basic_cols = [c for c in basic_cols if c in df.columns]
-
 missing_total = int(df.isnull().sum().sum())
 
 
-# --------------------------------------------------
-# 사이드바 메인 목차
-# --------------------------------------------------
+# ==========================================
+# 사이드바 메뉴
+# ==========================================
 st.sidebar.title("⚙️ 메인 목차")
-st.sidebar.caption("확인하고 싶은 분석 항목을 선택하세요.")
 
 menu = st.sidebar.radio(
     "분석 항목",
     [
         "🏠 홈",
-        "1. 기초 통계 및 이상치",
-        "2. 범주형 변수의 분포",
-        "3. 기계 고장 여부 분석",
-        "4. 변수 간 상관관계",
-        "5. 결측치 확인",
-        "6. 변수에 따른 기계 고장률 비교"
+        "1. 문제 정의",
+        "2. 데이터 분석",
+        "3. 데이터 전처리",
+        "4. 기준선 설정",
+        "5. 모델 학습 및 평가"
     ],
     label_visibility="collapsed"
 )
 
 st.sidebar.divider()
-st.sidebar.markdown("### 📊 데이터 정보")
-st.sidebar.metric("전체 데이터 수", f"{len(df):,}개")
-st.sidebar.metric("전체 변수 수", f"{len(df.columns)}개")
-st.sidebar.metric("전체 결측치 수", f"{missing_total:,}개")
+st.sidebar.subheader("📊 데이터 정보")
+st.sidebar.metric("행 개수", f"{len(df):,}개")
+st.sidebar.metric("열 개수", f"{len(df.columns)}개")
+st.sidebar.metric("결측치", f"{missing_total:,}개")
+
+st.title("⚙️ 기계 고장 예측 분석실")
+st.caption("기계 작동 데이터를 분석하여 고장과 관련된 요인을 알아봅니다.")
 
 
-# --------------------------------------------------
-# 공통 제목
-# --------------------------------------------------
-st.title("⚙️ 기계 고장 기초통계 분석실")
-st.caption("기계 작동 데이터를 살펴보고 고장에 영향을 주는 요인을 분석합니다.")
-
-
-# --------------------------------------------------
+# ==========================================
 # 홈
-# --------------------------------------------------
+# ==========================================
 if menu == "🏠 홈":
-    st.header("분석 메뉴")
+
+    st.header("기계 고장 예측 분석실")
+
     st.write(
-        "왼쪽의 메인 목차에서 확인하고 싶은 항목을 선택하세요. "
-        "선택한 분석 화면만 표시됩니다."
+        "이 프로젝트는 기계의 온도, 회전 속도, 토크, "
+        "공구 마모 시간 등의 데이터를 분석하여 "
+        "기계 고장과 관련된 요인을 알아보고 "
+        "기계 고장 여부를 예측하는 것을 목표로 합니다."
     )
 
-    st.subheader("📁 데이터 기본 정보")
     c1, c2, c3 = st.columns(3)
-    c1.metric("행 개수", f"{len(df):,}개")
-    c2.metric("열 개수", f"{len(df.columns)}개")
-    c3.metric("결측치 개수", f"{missing_total:,}개")
+    c1.metric("전체 데이터", f"{len(df):,}개")
+    c2.metric("전체 변수", f"{len(df.columns)}개")
+    c3.metric("결측치", f"{missing_total:,}개")
 
-    st.subheader("🔍 분석할 수 있는 내용")
+    st.subheader("분석 목차")
+
     st.markdown("""
-    - **1. 기초 통계 및 이상치:** 수치형 변수의 평균, 최솟값, 최댓값과 박스플롯 확인
-    - **2. 범주형 변수의 분포:** 제품 유형별 데이터 비율 확인
-    - **3. 기계 고장 여부 분석:** 정상 작동과 고장 발생 비율 확인
-    - **4. 변수 간 상관관계:** 각 변수 사이의 상관관계 확인
-    - **5. 결측치 확인:** 변수별 비어 있는 데이터 개수 확인
-    - **6. 변수에 따른 기계 고장률 비교:** 낮은 그룹과 높은 그룹의 고장률 비교
+    **1. 문제 정의**
+    - 주제 선정 이유와 분석 목표
+
+    **2. 데이터 분석**
+    - 기초 통계 및 그래프
+    - 제품 유형별 분포
+    - 기계 고장률 분석
+    - 변수 간 상관관계
+
+    **3. 데이터 전처리**
+    - 변수명 변경 및 자료형 변환
+    - 결측치 확인
+    - 이상치 탐색
+
+    **4. 기준선 설정**
+    - 다수 클래스 기준선 성능 확인
+
+    **5. 모델 학습 및 평가**
+    - 랜덤 포레스트 모델
+    - 정확도, 정밀도, 재현율, F1 점수
+    - 혼동 행렬
     """)
 
-    st.info("분석을 시작하려면 왼쪽 메인 목차에서 원하는 항목을 눌러 주세요.")
+    st.info("왼쪽 목차를 눌러 원하는 분석을 확인하세요.")
 
 
-# --------------------------------------------------
-# 1. 기초 통계 및 이상치
-# --------------------------------------------------
-elif menu == "1. 기초 통계 및 이상치":
-    st.header("1️⃣ 수치형 변수의 기초 통계")
+# ==========================================
+# 1. 문제 정의
+# ==========================================
+elif menu == "1. 문제 정의":
+
+    st.header("1️⃣ 문제 정의")
+
+    st.subheader("주제")
+    st.write("기계 고장에 영향을 주는 요인은 무엇이며, 기계 고장을 예측할 수 있을까?")
+
+    st.subheader("주제 선정 이유")
     st.write(
-        "기계의 온도, 회전 속도, 토크, 공구 마모 시간 등의 "
-        "평균과 최솟값, 최댓값 등을 확인합니다."
+        "기계가 갑자기 고장 나면 생산이 중단되거나 "
+        "수리 비용이 발생할 수 있다. "
+        "기계의 온도, 회전 속도, 토크, 공구 마모 시간 등을 "
+        "분석하면 고장과 관련된 요인을 알아볼 수 있다고 생각하여 "
+        "이 주제를 선택하였다."
     )
 
-    if available_basic_cols:
-        st.dataframe(
-            df[available_basic_cols].describe().round(2),
-            use_container_width=True
-        )
+    st.subheader("분석 목표")
+    st.markdown("""
+    - 기계 작동 변수의 기초 통계와 분포를 확인한다.
+    - 정상 작동과 고장 발생 비율을 분석한다.
+    - 변수에 따라 고장률에 차이가 있는지 비교한다.
+    - 기계 작동 정보를 이용해 고장 여부를 예측한다.
+    - 예측 모델의 성능을 평가한다.
+    """)
 
-        selected_basic = st.selectbox(
-            "히스토그램으로 확인할 변수",
-            available_basic_cols
-        )
+    st.subheader("주요 변수 설명")
 
-        fig = px.histogram(
-            df,
-            x=selected_basic,
-            nbins=30,
-            title=f"{selected_basic} 분포",
-            color_discrete_sequence=["#4A90E2"]
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    meaning = pd.DataFrame({
+        "변수": [
+            "제품 유형",
+            "공기 온도(K)",
+            "공정 온도(K)",
+            "회전 속도(rpm)",
+            "토크(N·m)",
+            "공구 마모 시간(분)",
+            "기계 고장 여부"
+        ],
+        "의미": [
+            "제품의 유형",
+            "기계 주변 공기의 온도",
+            "기계 공정 중 온도",
+            "기계의 회전 속도",
+            "기계에 걸리는 회전력",
+            "공구를 사용한 시간",
+            "정상(0) 또는 고장(1)"
+        ]
+    })
+
+    st.dataframe(meaning, use_container_width=True, hide_index=True)
+
+
+# ==========================================
+# 2. 데이터 분석
+# ==========================================
+elif menu == "2. 데이터 분석":
+
+    st.header("2️⃣ 데이터 분석")
+
+    st.subheader("① 기초 통계")
+
+    available_cols = [c for c in basic_cols if c in df.columns]
+
+    st.dataframe(
+        df[available_cols].describe().round(2),
+        use_container_width=True
+    )
+
+    selected = st.selectbox("히스토그램 변수 선택", available_cols)
+
+    fig = px.histogram(
+        df,
+        x=selected,
+        nbins=30,
+        title=f"{selected} 분포",
+        color_discrete_sequence=["#4A90E2"]
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
-    st.header("🔎 이상치 확인하기")
-    st.write(
-        "박스플롯의 상자 바깥에 표시되는 점은 IQR 기준 이상치 후보입니다. "
-        "이상치 후보가 반드시 잘못된 데이터라는 뜻은 아닙니다."
+
+    st.subheader("② 제품 유형별 분포")
+
+    type_counts = (
+        df["제품 유형"].fillna("값 없음")
+        .value_counts()
+        .reset_index()
+    )
+    type_counts.columns = ["제품 유형", "개수"]
+
+    fig = px.pie(
+        type_counts,
+        names="제품 유형",
+        values="개수",
+        title="제품 유형별 분포",
+        color_discrete_sequence=["#4A90E2", "#50C878", "#F4B942"]
+    )
+    fig.update_traces(textinfo="label+percent")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    st.subheader("③ 정상 및 고장 비율")
+
+    failure_counts = (
+        df["기계 고장 여부"]
+        .map({0: "정상", 1: "고장"})
+        .fillna("기타")
+        .value_counts()
+        .reset_index()
+    )
+    failure_counts.columns = ["상태", "개수"]
+
+    fig = px.pie(
+        failure_counts,
+        names="상태",
+        values="개수",
+        color="상태",
+        color_discrete_map={
+            "정상": "#4A90E2",
+            "고장": "#EF5350",
+            "기타": "#999999"
+        },
+        title="정상 및 고장 비율"
+    )
+    fig.update_traces(textinfo="label+percent")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    st.subheader("④ 변수 간 상관관계")
+
+    corr_cols = available_cols + ["기계 고장 여부"]
+    corr = df[corr_cols].corr()
+
+    fig = px.imshow(
+        corr,
+        text_auto=".2f",
+        color_continuous_scale="RdBu_r",
+        zmin=-1,
+        zmax=1,
+        title="변수 간 상관관계"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.write("기계 고장 여부와 각 변수의 상관계수")
+
+    target_corr = (
+        corr["기계 고장 여부"]
+        .drop("기계 고장 여부")
+        .sort_values(key=abs, ascending=False)
+        .reset_index()
+    )
+    target_corr.columns = ["변수", "상관계수"]
+
+    st.dataframe(
+        target_corr.round(3),
+        use_container_width=True,
+        hide_index=True
     )
 
-    if available_basic_cols:
-        selected_outlier = st.selectbox(
-            "박스플롯으로 확인할 변수",
-            available_basic_cols,
-            key="outlier_select"
-        )
+    st.divider()
 
-        values = pd.to_numeric(
-            df[selected_outlier], errors="coerce"
-        ).dropna()
+    st.subheader("⑤ 변수에 따른 기계 고장률 비교")
 
-        if len(values) > 0:
-            q1 = values.quantile(0.25)
-            q3 = values.quantile(0.75)
-            iqr = q3 - q1
-            lower_bound = q1 - 1.5 * iqr
-            upper_bound = q3 + 1.5 * iqr
-
-            outlier_data = values[
-                (values < lower_bound) | (values > upper_bound)
-            ]
-
-            fig = px.box(
-                df,
-                y=selected_outlier,
-                points="outliers",
-                title=f"{selected_outlier} 박스플롯",
-                color_discrete_sequence=["#4A90E2"]
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("이상치 후보 개수", f"{len(outlier_data):,}개")
-            c2.metric(
-                "이상치 후보 비율",
-                f"{len(outlier_data) / len(values) * 100:.2f}%"
-            )
-            c3.metric("분석 데이터 수", f"{len(values):,}개")
-
-            st.write("**IQR 기준 범위**")
-            st.write(f"- 하한: {lower_bound:.2f}")
-            st.write(f"- 상한: {upper_bound:.2f}")
-
-        outlier_summary = []
-        for col in available_basic_cols:
-            vals = pd.to_numeric(df[col], errors="coerce").dropna()
-            if len(vals) == 0:
-                continue
-
-            q1_col = vals.quantile(0.25)
-            q3_col = vals.quantile(0.75)
-            iqr_col = q3_col - q1_col
-            low = q1_col - 1.5 * iqr_col
-            high = q3_col + 1.5 * iqr_col
-            count = int(((vals < low) | (vals > high)).sum())
-
-            outlier_summary.append({
-                "변수": col,
-                "이상치 후보 개수": count,
-                "이상치 후보 비율(%)": round(count / len(vals) * 100, 2)
-            })
-
-        st.subheader("변수별 이상치 후보 개수")
-        st.dataframe(
-            pd.DataFrame(outlier_summary),
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# --------------------------------------------------
-# 2. 범주형 변수의 분포
-# --------------------------------------------------
-elif menu == "2. 범주형 변수의 분포":
-    st.header("2️⃣ 범주형 변수의 분포")
-    st.write("제품 유형별 데이터가 얼마나 분포되어 있는지 원형 그래프로 확인합니다.")
-
-    if "제품 유형" in df.columns:
-        type_counts = (
-            df["제품 유형"].fillna("값 없음")
-            .value_counts()
-            .reset_index()
-        )
-        type_counts.columns = ["제품 유형", "개수"]
-
-        fig = px.pie(
-            type_counts,
-            names="제품 유형",
-            values="개수",
-            title="제품 유형별 분포",
-            color_discrete_sequence=["#4A90E2", "#50C878", "#F4B942"]
-        )
-        fig.update_traces(textinfo="label+percent", textposition="inside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(type_counts, use_container_width=True, hide_index=True)
-
-
-# --------------------------------------------------
-# 3. 기계 고장 여부 분석
-# --------------------------------------------------
-elif menu == "3. 기계 고장 여부 분석":
-    st.header("3️⃣ 기계 고장 여부 분석")
-    st.write("전체 기계 중 정상 작동한 기계와 고장이 발생한 기계의 비율입니다.")
-
-    if "기계 고장 여부" in df.columns:
-        failure_counts = (
-            df["기계 고장 여부"]
-            .map({0: "정상", 1: "고장"})
-            .fillna("기타")
-            .value_counts()
-            .reset_index()
-        )
-        failure_counts.columns = ["상태", "개수"]
-
-        fig = px.pie(
-            failure_counts,
-            names="상태",
-            values="개수",
-            title="정상 및 고장 비율",
-            color="상태",
-            color_discrete_map={
-                "정상": "#4A90E2",
-                "고장": "#EF5350",
-                "기타": "#999999"
-            }
-        )
-        fig.update_traces(textinfo="label+percent", textposition="inside")
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# --------------------------------------------------
-# 4. 상관관계 분석
-# --------------------------------------------------
-elif menu == "4. 변수 간 상관관계":
-    st.header("4️⃣ 변수 간 상관관계 분석")
-    st.write(
-        "상관계수가 1에 가까우면 양의 관계, -1에 가까우면 음의 관계를 나타냅니다."
+    type_options = ["전체"] + sorted(
+        df["제품 유형"].dropna().unique().tolist()
     )
 
-    corr_cols = [
-        "공기 온도(K)", "공정 온도(K)", "회전 속도(rpm)",
-        "토크(N·m)", "공구 마모 시간(분)", "기계 고장 여부"
-    ]
-    available_corr_cols = [c for c in corr_cols if c in df.columns]
+    selected_type = st.selectbox("제품 유형 선택", type_options)
 
-    if len(available_corr_cols) >= 2:
-        corr = df[available_corr_cols].corr()
+    col1, col2 = st.columns(2)
 
-        fig = px.imshow(
-            corr,
-            text_auto=".2f",
-            color_continuous_scale="RdBu_r",
-            zmin=-1,
-            zmax=1,
-            title="기계 작동 변수 간 상관관계"
+    with col1:
+        var1 = st.selectbox("첫 번째 비교 변수", available_cols)
+
+    with col2:
+        var2 = st.selectbox(
+            "두 번째 비교 변수",
+            available_cols,
+            index=1,
+            key="var2"
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        if "기계 고장 여부" in corr.columns:
-            st.subheader("기계 고장 여부와의 상관관계")
-            target_corr = (
-                corr["기계 고장 여부"]
-                .drop("기계 고장 여부")
-                .sort_values(key=abs, ascending=False)
-                .reset_index()
-            )
-            target_corr.columns = ["변수", "상관계수"]
-            st.dataframe(
-                target_corr.round(3),
-                use_container_width=True,
-                hide_index=True
-            )
+    compare_df = df.copy()
+
+    if selected_type != "전체":
+        compare_df = compare_df[
+            compare_df["제품 유형"] == selected_type
+        ]
+
+    def show_comparison(data, variable):
+
+        temp = data[[variable, "기계 고장 여부"]].dropna().copy()
+
+        median = temp[variable].median()
+
+        temp["그룹"] = temp[variable].apply(
+            lambda x: "낮은 그룹" if x <= median else "높은 그룹"
+        )
+
+        st.markdown(f"**📌 {variable}에 따른 고장률**")
+
+        cols = st.columns(2)
+
+        for i, group in enumerate(["낮은 그룹", "높은 그룹"]):
+
+            part = temp[temp["그룹"] == group]
+
+            total = len(part)
+            failure = int((part["기계 고장 여부"] == 1).sum())
+            normal = int((part["기계 고장 여부"] == 0).sum())
+
+            rate = failure / total * 100 if total else 0
+
+            with cols[i]:
+
+                st.metric(f"{group} 고장률", f"{rate:.2f}%")
+
+                pie = px.pie(
+                    pd.DataFrame({
+                        "상태": ["정상", "고장"],
+                        "개수": [normal, failure]
+                    }),
+                    names="상태",
+                    values="개수",
+                    color="상태",
+                    color_discrete_map={
+                        "정상": "#4A90E2",
+                        "고장": "#EF5350"
+                    }
+                )
+
+                pie.update_traces(textinfo="label+percent")
+
+                st.plotly_chart(pie, use_container_width=True)
+
+                st.caption(
+                    f"전체 {total}개 / 정상 {normal}개 / 고장 {failure}개"
+                )
+
+        st.caption(f"그룹 구분 기준 중앙값: {median:.2f}")
+
+    show_comparison(compare_df, var1)
+
+    if var2 != var1:
+        st.divider()
+        show_comparison(compare_df, var2)
+    else:
+        st.warning("두 번째 변수는 첫 번째 변수와 다르게 선택해 주세요.")
 
 
-# --------------------------------------------------
-# 5. 결측치 확인
-# --------------------------------------------------
-elif menu == "5. 결측치 확인":
-    st.header("5️⃣ 결측치 확인")
-    st.write("각 변수에 비어 있는 데이터가 얼마나 있는지 확인합니다.")
+# ==========================================
+# 3. 데이터 전처리
+# ==========================================
+elif menu == "3. 데이터 전처리":
 
-    missing_summary = pd.DataFrame({
+    st.header("3️⃣ 데이터 전처리")
+
+    st.subheader("① 데이터 정리")
+
+    st.write("""
+    - 영어 변수명을 이해하기 쉬운 한국어로 변경하였다.
+    - 숫자형 변수를 숫자 자료형으로 변환하였다.
+    - 제품 번호와 데이터 번호는 식별자이므로 예측 모델에서 제외한다.
+    """)
+
+    st.divider()
+
+    st.subheader("② 결측치 확인")
+
+    st.metric("전체 결측치 개수", f"{missing_total:,}개")
+
+    missing_table = pd.DataFrame({
         "변수": df.columns,
         "결측치 개수": df.isnull().sum().values,
-        "결측치 비율(%)": (df.isnull().mean().values * 100).round(2)
+        "결측치 비율(%)": (
+            df.isnull().mean().values * 100
+        ).round(2)
     })
 
     st.dataframe(
-        missing_summary,
+        missing_table,
         use_container_width=True,
         hide_index=True
     )
 
     if missing_total == 0:
-        st.success("결측치가 없습니다.")
+        st.success("현재 데이터에는 결측치가 없습니다.")
     else:
-        st.warning(f"전체 결측치가 {missing_total:,}개 있습니다.")
+        st.warning("결측치가 있는 변수를 확인해야 합니다.")
 
+    st.divider()
 
-# --------------------------------------------------
-# 6. 변수에 따른 기계 고장률 비교
-# --------------------------------------------------
-elif menu == "6. 변수에 따른 기계 고장률 비교":
-    st.header("6️⃣ 변수에 따른 기계 고장률 비교")
+    st.subheader("③ 이상치 탐색")
+
     st.write(
-        "제품 유형을 선택하고 두 가지 변수를 골라 낮은 그룹과 높은 그룹의 "
-        "고장률을 비교합니다."
+        "IQR 방식으로 이상치 후보를 확인합니다. "
+        "이상치 후보가 반드시 잘못된 데이터라는 뜻은 아니므로 "
+        "자동으로 삭제하지 않습니다."
     )
 
-    if "기계 고장 여부" in df.columns and "제품 유형" in df.columns:
-        type_options = ["전체"] + sorted(
-            df["제품 유형"].dropna().unique().tolist()
+    outlier_summary = []
+
+    for col in available_cols:
+
+        values = df[col].dropna()
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        count = int(
+            ((values < lower) | (values > upper)).sum()
         )
-        selected_type = st.selectbox("제품 유형 선택", type_options)
 
-        compare_cols = [c for c in basic_cols if c in df.columns]
+        outlier_summary.append({
+            "변수": col,
+            "하한": round(lower, 2),
+            "상한": round(upper, 2),
+            "이상치 후보 개수": count,
+            "이상치 후보 비율(%)": round(
+                count / len(values) * 100, 2
+            )
+        })
 
-        if len(compare_cols) >= 2:
-            col1, col2 = st.columns(2)
+    st.dataframe(
+        pd.DataFrame(outlier_summary),
+        use_container_width=True,
+        hide_index=True
+    )
 
-            with col1:
-                variable1 = st.selectbox(
-                    "첫 번째 비교 변수",
-                    compare_cols,
-                    index=0
-                )
+    selected_outlier = st.selectbox(
+        "박스플롯 변수 선택",
+        available_cols
+    )
 
-            with col2:
-                variable2 = st.selectbox(
-                    "두 번째 비교 변수",
-                    compare_cols,
-                    index=1,
-                    key="variable2_select"
-                )
+    fig = px.box(
+        df,
+        y=selected_outlier,
+        points="outliers",
+        title=f"{selected_outlier} 박스플롯"
+    )
 
-            compare_df = df.copy()
-            if selected_type != "전체":
-                compare_df = compare_df[
-                    compare_df["제품 유형"] == selected_type
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.info(
+        "이상치 후보는 삭제하지 않고 그래프와 통계로 확인하는 방식으로 처리하였습니다."
+    )
+
+
+# ==========================================
+# 4. 기준선 설정
+# ==========================================
+elif menu == "4. 기준선 설정":
+
+    st.header("4️⃣ 기준선 설정")
+
+    st.write(
+        "기준선은 복잡한 모델을 만들기 전에 비교 기준으로 사용하는 "
+        "가장 단순한 예측 방법입니다."
+    )
+
+    st.subheader("다수 클래스 기준선")
+
+    target = df["기계 고장 여부"].dropna().astype(int)
+
+    normal_count = int((target == 0).sum())
+    failure_count = int((target == 1).sum())
+
+    majority_count = max(normal_count, failure_count)
+    baseline_accuracy = majority_count / len(target) * 100
+
+    counts = pd.DataFrame({
+        "상태": ["정상", "고장"],
+        "개수": [normal_count, failure_count]
+    })
+
+    st.dataframe(counts, use_container_width=True, hide_index=True)
+
+    st.metric(
+        "다수 클래스 기준선 정확도",
+        f"{baseline_accuracy:.2f}%"
+    )
+
+    if normal_count > failure_count:
+        st.write(
+            "정상 데이터가 더 많기 때문에 모든 기계를 정상이라고 예측하는 "
+            "방식을 기준선으로 설정합니다."
+        )
+    else:
+        st.write(
+            "고장 데이터가 더 많기 때문에 모든 기계를 고장이라고 예측하는 "
+            "방식을 기준선으로 설정합니다."
+        )
+
+    st.warning(
+        "정확도만 높다고 고장 예측을 잘하는 것은 아닙니다. "
+        "고장 데이터를 얼마나 찾아내는지 재현율도 함께 확인해야 합니다."
+    )
+
+
+# ==========================================
+# 5. 모델 학습 및 평가
+# ==========================================
+elif menu == "5. 모델 학습 및 평가":
+
+    st.header("5️⃣ 모델 학습 및 평가")
+
+    st.write(
+        "기계 작동 정보를 이용하여 기계 고장 여부를 예측하는 "
+        "랜덤 포레스트 분류 모델을 학습합니다."
+    )
+
+    st.subheader("① 모델에 사용하는 변수")
+
+    st.markdown("""
+    **입력 변수**
+    - 제품 유형
+    - 공기 온도
+    - 공정 온도
+    - 회전 속도
+    - 토크
+    - 공구 마모 시간
+
+    **예측 대상**
+    - 기계 고장 여부 (0=정상, 1=고장)
+
+    고장 유형을 나타내는 TWF, HDF, PWF, OSF, RNF는
+    정답과 직접 연결된 정보이므로 입력 변수에서 제외합니다.
+    """)
+
+    test_size = st.slider(
+        "평가용 데이터 비율",
+        0.1, 0.4, 0.2, 0.05
+    )
+
+    if st.button("모델 학습 및 평가하기", type="primary"):
+
+        model_cols = ["제품 유형"] + available_cols
+
+        model_df = df[
+            model_cols + ["기계 고장 여부"]
+        ].dropna().copy()
+
+        X = model_df[model_cols]
+        y = model_df["기계 고장 여부"].astype(int)
+
+        if y.nunique() < 2:
+            st.error("정상과 고장 데이터가 모두 필요합니다.")
+
+        elif y.value_counts().min() < 2:
+            st.error("학습과 평가를 나누기에 데이터가 부족합니다.")
+
+        else:
+
+            X_train, X_test, y_train, y_test = train_test_split(
+                X,
+                y,
+                test_size=test_size,
+                random_state=42,
+                stratify=y
+            )
+
+            # 기준선 모델
+            baseline = DummyClassifier(
+                strategy="most_frequent"
+            )
+
+            baseline.fit(X_train, y_train)
+            baseline_pred = baseline.predict(X_test)
+
+            # 범주형 변수 처리
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    (
+                        "type",
+                        OneHotEncoder(handle_unknown="ignore"),
+                        ["제품 유형"]
+                    ),
+                    (
+                        "numeric",
+                        "passthrough",
+                        available_cols
+                    )
                 ]
+            )
 
-            def show_failure_comparison(data, variable):
-                temp = data[[variable, "기계 고장 여부"]].copy()
-                temp[variable] = pd.to_numeric(temp[variable], errors="coerce")
-                temp["기계 고장 여부"] = pd.to_numeric(
-                    temp["기계 고장 여부"], errors="coerce"
+            # 랜덤 포레스트 모델
+            model = Pipeline([
+                ("preprocessor", preprocessor),
+                (
+                    "classifier",
+                    RandomForestClassifier(
+                        n_estimators=200,
+                        random_state=42,
+                        class_weight="balanced",
+                        n_jobs=-1
+                    )
                 )
-                temp = temp.dropna()
+            ])
 
-                if temp.empty:
-                    st.warning(f"{variable}의 분석 가능한 데이터가 없습니다.")
-                    return
+            with st.spinner("모델을 학습하고 있습니다..."):
+                model.fit(X_train, y_train)
+                prediction = model.predict(X_test)
 
-                median_value = temp[variable].median()
-                temp["그룹"] = temp[variable].apply(
-                    lambda x: "낮은 그룹" if x <= median_value else "높은 그룹"
-                )
+            st.success("모델 학습이 완료되었습니다.")
 
-                st.subheader(f"📌 {variable}에 따른 고장률")
-                group_cols = st.columns(2)
+            st.write(
+                f"학습 데이터: {len(X_train):,}개 / "
+                f"평가 데이터: {len(X_test):,}개"
+            )
 
-                for i, group_name in enumerate(["낮은 그룹", "높은 그룹"]):
-                    group_data = temp[temp["그룹"] == group_name]
-                    total = len(group_data)
-                    failure = int((group_data["기계 고장 여부"] == 1).sum())
-                    normal = int((group_data["기계 고장 여부"] == 0).sum())
-                    failure_rate = failure / total * 100 if total > 0 else 0
+            # 평가 지표 계산
+            results = []
 
-                    with group_cols[i]:
-                        st.markdown(f"**{group_name}**")
-                        st.metric("고장률", f"{failure_rate:.2f}%")
+            for name, pred in [
+                ("기준선 모델", baseline_pred),
+                ("랜덤 포레스트", prediction)
+            ]:
 
-                        pie_data = pd.DataFrame({
-                            "상태": ["정상", "고장"],
-                            "개수": [normal, failure]
-                        })
-                        fig = px.pie(
-                            pie_data,
-                            names="상태",
-                            values="개수",
-                            color="상태",
-                            color_discrete_map={
-                                "정상": "#4A90E2",
-                                "고장": "#EF5350"
-                            },
-                            title=f"{group_name} 정상·고장 비율"
-                        )
-                        fig.update_traces(
-                            textinfo="label+percent",
-                            textposition="inside"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.caption(
-                            f"전체 {total:,}개 / 정상 {normal:,}개 / 고장 {failure:,}개"
-                        )
+                results.append({
+                    "모델": name,
+                    "정확도": accuracy_score(y_test, pred),
+                    "정밀도": precision_score(
+                        y_test, pred, zero_division=0
+                    ),
+                    "재현율": recall_score(
+                        y_test, pred, zero_division=0
+                    ),
+                    "F1 점수": f1_score(
+                        y_test, pred, zero_division=0
+                    )
+                })
 
-                st.caption(
-                    f"낮은 그룹과 높은 그룹의 구분 기준(중앙값): {median_value:.2f}"
-                )
+            result_df = pd.DataFrame(results)
 
-            show_failure_comparison(compare_df, variable1)
+            display_df = result_df.copy()
+
+            for col in [
+                "정확도", "정밀도", "재현율", "F1 점수"
+            ]:
+                display_df[col] = (
+                    display_df[col] * 100
+                ).round(2).astype(str) + "%"
+
+            st.subheader("② 모델 성능 비교")
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
             st.divider()
 
-            if variable2 != variable1:
-                show_failure_comparison(compare_df, variable2)
+            st.subheader("③ 혼동 행렬")
+
+            cm = confusion_matrix(
+                y_test,
+                prediction,
+                labels=[0, 1]
+            )
+
+            cm_df = pd.DataFrame(
+                cm,
+                index=["실제 정상", "실제 고장"],
+                columns=["예측 정상", "예측 고장"]
+            )
+
+            st.dataframe(
+                cm_df,
+                use_container_width=True
+            )
+
+            fig = px.imshow(
+                cm,
+                text_auto=True,
+                x=["예측 정상", "예측 고장"],
+                y=["실제 정상", "실제 고장"],
+                color_continuous_scale="Blues",
+                title="랜덤 포레스트 혼동 행렬"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
+
+            st.subheader("④ 평가 지표 설명")
+
+            st.markdown("""
+            - **정확도:** 전체 예측 중 맞게 예측한 비율
+            - **정밀도:** 고장이라고 예측한 것 중 실제 고장인 비율
+            - **재현율:** 실제 고장 중 모델이 찾아낸 비율
+            - **F1 점수:** 정밀도와 재현율을 함께 고려한 점수
+            """)
+
+            rf = result_df[
+                result_df["모델"] == "랜덤 포레스트"
+            ].iloc[0]
+
+            base = result_df[
+                result_df["모델"] == "기준선 모델"
+            ].iloc[0]
+
+            st.subheader("⑤ 분석 결과 해석")
+
+            if rf["F1 점수"] > base["F1 점수"]:
+                st.success(
+                    "랜덤 포레스트의 F1 점수가 기준선보다 높습니다. "
+                    "이번 평가에서는 단순 기준선보다 고장 여부를 "
+                    "구분하는 데 더 나은 결과를 보였습니다."
+                )
+
+            elif rf["F1 점수"] == base["F1 점수"]:
+                st.info(
+                    "랜덤 포레스트와 기준선의 F1 점수가 같습니다. "
+                    "기준선보다 성능이 향상되었다고 보기 어렵습니다."
+                )
+
             else:
-                st.info("두 번째 변수는 첫 번째 변수와 다르게 선택해 주세요.")
+                st.warning(
+                    "랜덤 포레스트의 F1 점수가 기준선보다 낮습니다. "
+                    "변수와 모델 설정을 추가로 검토할 필요가 있습니다."
+                )
+
+            st.caption(
+                "※ 이 결과는 현재 데이터 분할과 모델 설정에 따른 평가 결과이며, "
+                "다른 데이터에서도 같은 성능을 보장하지는 않습니다."
+            )
+
+    else:
+        st.info("버튼을 누르면 모델 학습과 평가가 시작됩니다.")
 
 
-# --------------------------------------------------
-# 하단 안내
-# --------------------------------------------------
+# ==========================================
+# 하단
+# ==========================================
 st.divider()
-st.caption("기계 고장 기초통계 분석실")
+st.caption("기계 고장 예측 분석실")
