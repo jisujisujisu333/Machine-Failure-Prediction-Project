@@ -207,7 +207,6 @@ if menu == "🏠 홈":
     **2. 데이터 분석**
     - 변수 간 상관관계
     - 변수에 따른 기계 고장률 비교
-    - 로지스틱 회귀 분석
 
     **3. 데이터 전처리**
     - 변수명 변경 및 자료형 확인
@@ -218,6 +217,7 @@ if menu == "🏠 홈":
     - 다수 클래스 기준선 성능 확인
 
     **5. 모델 학습 및 평가**
+    - 로지스틱 회귀 모델
     - 랜덤 포레스트 모델
     - 평가 지표 및 혼동 행렬
     """)
@@ -291,8 +291,8 @@ elif menu == "2. 데이터 분석":
     st.header("2️⃣ 데이터 분석")
 
     st.write(
-        "변수 사이의 관계와 고장률을 확인하고, "
-        "로지스틱 회귀를 이용해 기계 고장 여부를 예측합니다."
+        "변수 사이의 관계와 각 변수의 조건에 따른 "
+        "기계 고장률을 비교합니다."
     )
 
     # --------------------------------------
@@ -472,10 +472,181 @@ elif menu == "2. 데이터 분석":
 
     st.divider()
 
+
+
+# ==========================================
+# 3. 데이터 전처리
+# ==========================================
+elif menu == "3. 데이터 전처리":
+
+    st.header("3️⃣ 데이터 전처리")
+
+    st.subheader("① 데이터 정리")
+
+    st.markdown("""
+    - 영어 변수명을 이해하기 쉬운 한국어로 변경하였다.
+    - 숫자형 변수를 숫자 자료형으로 변환하였다.
+    - 제품 번호와 데이터 번호는 식별자이므로 예측 모델에서 제외한다.
+    """)
+
+    st.divider()
+
+    st.subheader("② 결측치 확인")
+
+    st.metric("전체 결측치 개수", f"{missing_total:,}개")
+
+    missing_table = pd.DataFrame({
+        "변수": df.columns,
+        "결측치 개수": df.isnull().sum().values,
+        "결측치 비율(%)": (
+            df.isnull().mean().values * 100
+        ).round(2)
+    })
+
+    st.dataframe(
+        missing_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if missing_total == 0:
+        st.success("현재 데이터에는 결측치가 없습니다.")
+    else:
+        st.warning("결측치가 있는 변수를 확인해야 합니다.")
+
+    st.divider()
+
+    st.subheader("③ 이상치 탐색")
+
+    st.write(
+        "IQR 방식으로 이상치 후보를 확인합니다. "
+        "이상치 후보가 반드시 잘못된 데이터라는 뜻은 아니므로 "
+        "자동으로 삭제하지 않습니다."
+    )
+
+    outlier_summary = []
+
+    for col in available_cols:
+
+        values = df[col].dropna()
+
+        if len(values) == 0:
+            continue
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+        iqr = q3 - q1
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        count = int(
+            ((values < lower) | (values > upper)).sum()
+        )
+
+        outlier_summary.append({
+            "변수": col,
+            "하한": round(lower, 2),
+            "상한": round(upper, 2),
+            "이상치 후보 개수": count,
+            "이상치 후보 비율(%)": round(
+                count / len(values) * 100, 2
+            )
+        })
+
+    st.dataframe(
+        pd.DataFrame(outlier_summary),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    selected_outlier = st.selectbox(
+        "박스플롯 변수 선택",
+        available_cols
+    )
+
+    fig = px.box(
+        df,
+        y=selected_outlier,
+        points="outliers",
+        title=f"{selected_outlier} 박스플롯",
+        color_discrete_sequence=["#4A90E2"]
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.info(
+        "이상치 후보는 자동 삭제하지 않고 그래프와 통계로 확인합니다."
+    )
+
+
+# ==========================================
+# 4. 기준선 설정
+# ==========================================
+elif menu == "4. 기준선 설정":
+
+    st.header("4️⃣ 기준선 설정")
+
+    st.write(
+        "기준선은 복잡한 모델을 만들기 전에 비교 기준으로 사용하는 "
+        "가장 단순한 예측 방법입니다."
+    )
+
+    st.subheader("다수 클래스 기준선")
+
+    target = pd.to_numeric(
+        df["기계 고장 여부"],
+        errors="coerce"
+    ).dropna()
+
+    normal_count = int((target == 0).sum())
+    failure_count = int((target == 1).sum())
+
+    majority_count = max(normal_count, failure_count)
+
+    baseline_accuracy = (
+        majority_count / len(target) * 100
+        if len(target) > 0 else 0
+    )
+
+    counts = pd.DataFrame({
+        "상태": ["정상", "고장"],
+        "개수": [normal_count, failure_count]
+    })
+
+    st.dataframe(
+        counts,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.metric(
+        "다수 클래스 기준선 정확도",
+        f"{baseline_accuracy:.2f}%"
+    )
+
+    st.write(
+        "다수 클래스 기준선은 더 많은 쪽의 상태만 예측하는 "
+        "단순한 모델입니다. 다른 모델의 성능을 비교할 때 사용합니다."
+    )
+
+
+# ==========================================
+# 5. 모델 학습 및 평가
+# ==========================================
+elif menu == "5. 모델 학습 및 평가":
+
+    st.header("5️⃣ 모델 학습 및 평가")
+
+    st.write(
+        "로지스틱 회귀와 랜덤 포레스트를 이용하여 기계 고장 여부를 "
+        "예측하고 각 모델의 성능을 평가합니다."
+    )
+
     # --------------------------------------
-    # ③ 로지스틱 회귀 분석
+    # ① 로지스틱 회귀 분석
     # --------------------------------------
-    st.subheader("③ 로지스틱 회귀 분석")
+    st.subheader("① 로지스틱 회귀 분석")
 
     st.write(
         "로지스틱 회귀는 입력 변수들을 이용해 기계가 고장 날 "
@@ -712,174 +883,10 @@ elif menu == "2. 데이터 분석":
     )
 
 
-# ==========================================
-# 3. 데이터 전처리
-# ==========================================
-elif menu == "3. 데이터 전처리":
-
-    st.header("3️⃣ 데이터 전처리")
-
-    st.subheader("① 데이터 정리")
-
-    st.markdown("""
-    - 영어 변수명을 이해하기 쉬운 한국어로 변경하였다.
-    - 숫자형 변수를 숫자 자료형으로 변환하였다.
-    - 제품 번호와 데이터 번호는 식별자이므로 예측 모델에서 제외한다.
-    """)
-
     st.divider()
+    st.subheader("② 랜덤 포레스트")
 
-    st.subheader("② 결측치 확인")
-
-    st.metric("전체 결측치 개수", f"{missing_total:,}개")
-
-    missing_table = pd.DataFrame({
-        "변수": df.columns,
-        "결측치 개수": df.isnull().sum().values,
-        "결측치 비율(%)": (
-            df.isnull().mean().values * 100
-        ).round(2)
-    })
-
-    st.dataframe(
-        missing_table,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    if missing_total == 0:
-        st.success("현재 데이터에는 결측치가 없습니다.")
-    else:
-        st.warning("결측치가 있는 변수를 확인해야 합니다.")
-
-    st.divider()
-
-    st.subheader("③ 이상치 탐색")
-
-    st.write(
-        "IQR 방식으로 이상치 후보를 확인합니다. "
-        "이상치 후보가 반드시 잘못된 데이터라는 뜻은 아니므로 "
-        "자동으로 삭제하지 않습니다."
-    )
-
-    outlier_summary = []
-
-    for col in available_cols:
-
-        values = df[col].dropna()
-
-        if len(values) == 0:
-            continue
-
-        q1 = values.quantile(0.25)
-        q3 = values.quantile(0.75)
-        iqr = q3 - q1
-
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
-
-        count = int(
-            ((values < lower) | (values > upper)).sum()
-        )
-
-        outlier_summary.append({
-            "변수": col,
-            "하한": round(lower, 2),
-            "상한": round(upper, 2),
-            "이상치 후보 개수": count,
-            "이상치 후보 비율(%)": round(
-                count / len(values) * 100, 2
-            )
-        })
-
-    st.dataframe(
-        pd.DataFrame(outlier_summary),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    selected_outlier = st.selectbox(
-        "박스플롯 변수 선택",
-        available_cols
-    )
-
-    fig = px.box(
-        df,
-        y=selected_outlier,
-        points="outliers",
-        title=f"{selected_outlier} 박스플롯",
-        color_discrete_sequence=["#4A90E2"]
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.info(
-        "이상치 후보는 자동 삭제하지 않고 그래프와 통계로 확인합니다."
-    )
-
-
-# ==========================================
-# 4. 기준선 설정
-# ==========================================
-elif menu == "4. 기준선 설정":
-
-    st.header("4️⃣ 기준선 설정")
-
-    st.write(
-        "기준선은 복잡한 모델을 만들기 전에 비교 기준으로 사용하는 "
-        "가장 단순한 예측 방법입니다."
-    )
-
-    st.subheader("다수 클래스 기준선")
-
-    target = pd.to_numeric(
-        df["기계 고장 여부"],
-        errors="coerce"
-    ).dropna()
-
-    normal_count = int((target == 0).sum())
-    failure_count = int((target == 1).sum())
-
-    majority_count = max(normal_count, failure_count)
-
-    baseline_accuracy = (
-        majority_count / len(target) * 100
-        if len(target) > 0 else 0
-    )
-
-    counts = pd.DataFrame({
-        "상태": ["정상", "고장"],
-        "개수": [normal_count, failure_count]
-    })
-
-    st.dataframe(
-        counts,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.metric(
-        "다수 클래스 기준선 정확도",
-        f"{baseline_accuracy:.2f}%"
-    )
-
-    st.write(
-        "다수 클래스 기준선은 더 많은 쪽의 상태만 예측하는 "
-        "단순한 모델입니다. 다른 모델의 성능을 비교할 때 사용합니다."
-    )
-
-
-# ==========================================
-# 5. 모델 학습 및 평가
-# ==========================================
-elif menu == "5. 모델 학습 및 평가":
-
-    st.header("5️⃣ 모델 학습 및 평가")
-
-    st.write(
-        "랜덤 포레스트를 이용하여 기계 고장 여부를 예측하고 "
-        "모델의 성능을 평가합니다."
-    )
+    st.write("랜덤 포레스트는 여러 결정 트리를 결합하여 예측하는 분류 모델입니다.")
 
     st.markdown("""
     **입력 변수**
