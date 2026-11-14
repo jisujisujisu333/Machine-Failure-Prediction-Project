@@ -1,4 +1,3 @@
-
 import os
 import glob
 
@@ -14,7 +13,7 @@ from matplotlib.font_manager import FontProperties
 
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.dummy import DummyClassifier
@@ -162,7 +161,8 @@ NUMERIC = [
 
 TARGET = "기계 고장 여부"
 
-MODEL_FEATURES = ["제품 유형"] + NUMERIC
+# 제품 유형(L, M, H)을 빼고 측정 변수 5개만 모델 입력으로 사용
+MODEL_FEATURES = NUMERIC.copy()
 
 
 @st.cache_data
@@ -239,17 +239,6 @@ failure_df = failure_df[
 
 def make_preprocessor(model_kind):
 
-    categorical = Pipeline([
-        (
-            "imputer",
-            SimpleImputer(strategy="most_frequent")
-        ),
-        (
-            "encoder",
-            OneHotEncoder(handle_unknown="ignore")
-        )
-    ])
-
     if model_kind == "logistic":
 
         numeric = Pipeline([
@@ -273,11 +262,6 @@ def make_preprocessor(model_kind):
         ])
 
     return ColumnTransformer([
-        (
-            "category",
-            categorical,
-            ["제품 유형"]
-        ),
         (
             "numeric",
             numeric,
@@ -352,16 +336,6 @@ def get_display_feature_names(preprocessor):
             ""
         )
 
-        name = name.replace(
-            "category__",
-            ""
-        )
-
-        name = name.replace(
-            "제품 유형_",
-            "제품 유형: "
-        )
-
         result.append(name)
 
     return result
@@ -376,8 +350,7 @@ def shorten_feature_names(names):
         "공정 온도(K)": "공정 온도",
         "회전 속도(rpm)": "회전 속도",
         "토크(N·m)": "토크",
-        "공구 마모 시간(분)": "공구 마모",
-        "제품 유형: ": "제품 유형 "
+        "공구 마모 시간(분)": "공구 마모"
     }
 
     for name in names:
@@ -838,10 +811,11 @@ elif menu == "3. 데이터 전처리":
     st.markdown("""
     - 영어 변수명을 이해하기 쉬운 한국어로 변경했습니다.
     - 측정값과 고장 여부를 숫자형으로 변환했습니다.
-    - 제품 유형과 5개 측정 변수를 모델 입력값으로 사용합니다.
+    - 5개 측정 변수(공기 온도, 공정 온도, 회전 속도, 토크, 공구 마모 시간)만 모델 입력값으로 사용합니다.
     - 제품 번호와 데이터 번호는 식별자이므로 모델에서 제외합니다.
+    - 제품 유형(L, M, H)은 모델 입력에서 제외하고 측정 변수 5개로만 예측합니다.
     - TWF, HDF, PWF, OSF, RNF는 고장 유형을 나타내며 정답과 직접 연결된 정보이므로 예측 입력에서 제외합니다.
-    - 모델 학습 과정에서 결측값은 중앙값 또는 최빈값으로 처리합니다.
+    - 모델 학습 과정에서 결측값은 중앙값으로 처리합니다.
     - 로지스틱 회귀의 수치형 변수는 표준화합니다.
     """)
 
@@ -981,7 +955,9 @@ elif menu == "5. 모델 학습 및 평가":
     st.header("5️⃣ 모델 학습 및 평가")
 
     st.write(
-        "같은 학습용·평가용 데이터로 세 모델을 학습하여 비교합니다."
+        "같은 학습용·평가용 데이터로 세 모델을 학습하여 비교합니다. "
+        "입력 변수는 공기 온도, 공정 온도, 회전 속도, 토크, 공구 마모 시간 "
+        "5개입니다."
     )
 
     st.subheader("세 모델의 예측 방식")
@@ -1356,7 +1332,7 @@ elif menu == "5. 모델 학습 및 평가":
         )
 
         fig_logistic.update_layout(
-            height=480,
+            height=420,
             template="plotly_white",
             xaxis_title="회귀 계수",
             yaxis_title="변수"
@@ -1370,7 +1346,7 @@ elif menu == "5. 모델 학습 및 평가":
         st.info(
             "양수 계수는 다른 조건이 같을 때 고장으로 예측하는 방향, "
             "음수 계수는 고장 확률을 낮추는 방향으로 작용합니다. "
-            "제품 유형은 기준 범주와 비교해 해석해야 합니다."
+            "수치형 변수는 표준화했으므로 막대 길이로 영향의 크기를 비교할 수 있습니다."
         )
 
         with st.expander(
@@ -1428,7 +1404,7 @@ elif menu == "5. 모델 학습 및 평가":
         )
 
         fig_forest.update_layout(
-            height=480,
+            height=420,
             template="plotly_white",
             xaxis_title="변수 중요도",
             yaxis_title="변수"
