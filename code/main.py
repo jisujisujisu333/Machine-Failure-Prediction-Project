@@ -20,8 +20,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.decomposition import PCA
+from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -251,7 +250,7 @@ def make_preprocessor(model_kind):
         )
     ])
 
-    if model_kind in ["logistic", "knn"]:
+    if model_kind == "logistic":
 
         numeric = Pipeline([
             (
@@ -843,7 +842,7 @@ elif menu == "3. 데이터 전처리":
     - 제품 번호와 데이터 번호는 식별자이므로 모델에서 제외합니다.
     - TWF, HDF, PWF, OSF, RNF는 고장 유형을 나타내며 정답과 직접 연결된 정보이므로 예측 입력에서 제외합니다.
     - 모델 학습 과정에서 결측값은 중앙값 또는 최빈값으로 처리합니다.
-    - 로지스틱 회귀와 KNN은 거리·계수 계산에 영향을 주는 변수의 크기 차이를 줄이기 위해 수치형 변수를 표준화합니다.
+    - 로지스틱 회귀의 수치형 변수는 표준화합니다.
     """)
 
     st.divider()
@@ -982,7 +981,7 @@ elif menu == "5. 모델 학습 및 평가":
     st.header("5️⃣ 모델 학습 및 평가")
 
     st.write(
-        "같은 학습용·평가용 데이터로 로지스틱 회귀, 랜덤 포레스트, KNN을 학습하여 비교합니다."
+        "같은 학습용·평가용 데이터로 세 모델을 학습하여 비교합니다."
     )
 
     st.subheader("세 모델의 예측 방식")
@@ -1009,11 +1008,11 @@ elif menu == "5. 모델 학습 및 평가":
 
     with col3:
 
-        st.markdown("**K-최근접 이웃(KNN)**")
+        st.markdown("**의사결정트리**")
 
         st.write(
-            "기존 학습 데이터에서 특성이 가까운 K개의 사례를 찾아 "
-            "다수결로 정상 또는 고장을 예측합니다."
+            "질문과 조건을 반복하며 가지를 나누어 "
+            "정상 또는 고장으로 분류합니다."
         )
 
     test_size = st.slider(
@@ -1083,21 +1082,19 @@ elif menu == "5. 모델 학습 및 평가":
                 )
             ])
 
-            # K-최근접 이웃(KNN)
-            # 거리 기반 모델이므로 수치형 변수를 표준화합니다.
-            knn = Pipeline([
+            # 의사결정트리
+
+            tree = Pipeline([
                 (
                     "preprocessor",
-                    make_preprocessor("knn")
+                    make_preprocessor("forest")
                 ),
                 (
                     "classifier",
-                    KNeighborsClassifier(
-                        n_neighbors=7,
-                        weights="distance",
-                        metric="minkowski",
-                        p=2,
-                        n_jobs=-1
+                    DecisionTreeClassifier(
+                        max_depth=5,
+                        class_weight="balanced",
+                        random_state=42
                     )
                 )
             ])
@@ -1124,26 +1121,26 @@ elif menu == "5. 모델 학습 및 평가":
                     "랜덤 포레스트"
                 )
 
-                knn_result = evaluate_model(
-                    knn,
+                tree_result = evaluate_model(
+                    tree,
                     X_train,
                     X_test,
                     y_train,
                     y_test,
-                    "K-최근접 이웃(KNN)"
+                    "의사결정트리"
                 )
 
             st.session_state["model_results"] = {
                 "logistic": logistic_result,
                 "forest": forest_result,
-                "knn": knn_result,
+                "tree": tree_result,
                 "train_count": len(X_train),
                 "test_count": len(X_test),
                 "test_size": test_size
             }
 
             st.success(
-                "로지스틱 회귀, 랜덤 포레스트, KNN의 학습과 평가가 완료되었습니다."
+                "세 모델의 학습과 평가가 완료되었습니다."
             )
 
         except Exception as exc:
@@ -1172,7 +1169,7 @@ elif menu == "5. 모델 학습 및 평가":
         metric_df = pd.DataFrame([
             results["logistic"]["metrics"],
             results["forest"]["metrics"],
-            results["knn"]["metrics"]
+            results["tree"]["metrics"]
         ])
 
         st.dataframe(
@@ -1234,7 +1231,7 @@ elif menu == "5. 모델 학습 및 평가":
         model_list = [
             ("logistic", "로지스틱 회귀"),
             ("forest", "랜덤 포레스트"),
-            ("knn", "K-최근접 이웃(KNN)")
+            ("tree", "의사결정트리")
         ]
 
         for col, (key, title) in zip(
@@ -1281,7 +1278,7 @@ elif menu == "5. 모델 학습 및 평가":
 
         logistic_model = results["logistic"]["model"]
         forest_model = results["forest"]["model"]
-        knn_model = results["knn"]["model"]
+        tree_model = results["tree"]["model"]
 
         logistic_preprocessor = (
             logistic_model.named_steps["preprocessor"]
@@ -1291,8 +1288,8 @@ elif menu == "5. 모델 학습 및 평가":
             forest_model.named_steps["preprocessor"]
         )
 
-        knn_preprocessor = (
-            knn_model.named_steps["preprocessor"]
+        tree_preprocessor = (
+            tree_model.named_steps["preprocessor"]
         )
 
         logistic_classifier = (
@@ -1303,8 +1300,8 @@ elif menu == "5. 모델 학습 및 평가":
             forest_model.named_steps["classifier"]
         )
 
-        knn_classifier = (
-            knn_model.named_steps["classifier"]
+        tree_classifier = (
+            tree_model.named_steps["classifier"]
         )
 
         # -------------------------------------------------
@@ -1458,173 +1455,86 @@ elif menu == "5. 모델 학습 및 평가":
         )
 
         # -------------------------------------------------
-        # ③ K-최근접 이웃(KNN) - 가까운 데이터 시각화
+        # ③ 의사결정트리 - 한글 표시 수정 버전
         # -------------------------------------------------
 
         st.divider()
 
         st.subheader(
-            "③ K-최근접 이웃(KNN) - 주변 데이터 확인"
+            "③ 의사결정트리 - 판단 과정"
         )
 
         st.write(
-            "KNN은 새로운 데이터와 기존 학습 데이터 사이의 거리를 계산한 뒤, "
-            "가까운 K개의 데이터가 정상인지 고장인지 살펴 다수결로 예측합니다. "
-            "아래에서는 평가용 데이터 한 건을 골라 가까운 학습 데이터 7개를 확인합니다."
+            "의사결정트리는 변수의 조건을 차례로 확인하며 "
+            "정상 또는 고장을 판단합니다."
         )
 
-        # 학습 데이터와 선택한 평가 데이터에 동일한 전처리를 적용합니다.
-        X_train_transformed = knn_preprocessor.transform(X_train)
-        X_test_transformed = knn_preprocessor.transform(X_test)
-
-        selected_index = 0
-        query_vector = X_test_transformed[selected_index]
-
-        distances, neighbor_indices = knn_classifier.kneighbors(
-            query_vector,
-            n_neighbors=7,
-            return_distance=True
+        tree_names = get_display_feature_names(
+            tree_preprocessor
         )
 
-        neighbor_indices = neighbor_indices[0]
-        neighbor_distances = distances[0]
-
-        # PCA는 여러 입력 변수를 2차원으로 줄여 화면에 보여주기 위한 용도입니다.
-        # 실제 KNN의 이웃 검색은 PCA 그래프가 아니라 전처리된 전체 변수 공간에서 수행됩니다.
-        pca = PCA(n_components=2, random_state=42)
-        train_2d = pca.fit_transform(
-            X_train_transformed.toarray()
-            if hasattr(X_train_transformed, "toarray")
-            else X_train_transformed
+        short_names = shorten_feature_names(
+            tree_names
         )
 
-        query_2d = pca.transform(
-            query_vector.toarray()
-            if hasattr(query_vector, "toarray")
-            else query_vector
+        # 그래프 크기와 해상도 조정
+        fig_tree, ax = plt.subplots(
+            figsize=(18, 9),
+            dpi=160
         )
 
-        neighbor_2d = train_2d[neighbor_indices]
-        neighbor_labels = y_train.iloc[neighbor_indices].to_numpy()
+        # Matplotlib 한글 글꼴 다시 적용
+        plt.rcParams["font.family"] = KOREAN_FONT_NAME
+        plt.rcParams["axes.unicode_minus"] = False
 
-        knn_plot_df = pd.DataFrame({
-            "주성분 1": train_2d[:, 0],
-            "주성분 2": train_2d[:, 1],
-            "상태": y_train.map({0: "정상", 1: "고장"}).to_numpy(),
-            "구분": "학습 데이터"
-        })
+        plot_tree(
+            tree_classifier,
+            feature_names=short_names,
+            class_names=["정상", "고장"],
+            filled=True,
+            rounded=True,
+            max_depth=2,
+            fontsize=11,
+            impurity=False,
+            proportion=False,
+            precision=1,
+            ax=ax
+        )
 
-        # 그래프가 너무 복잡해지지 않도록 배경 데이터는 일부만 표시합니다.
-        if len(knn_plot_df) > 1800:
-            knn_plot_df = knn_plot_df.sample(
-                1800,
-                random_state=42
+        # 트리 내부 글자에 한글 글꼴 적용
+        for text_item in ax.texts:
+
+            text_item.set_fontproperties(
+                KOREAN_FONT
             )
 
-        neighbor_plot_df = pd.DataFrame({
-            "주성분 1": neighbor_2d[:, 0],
-            "주성분 2": neighbor_2d[:, 1],
-            "상태": pd.Series(neighbor_labels).map({
-                0: "정상",
-                1: "고장"
-            }).to_numpy(),
-            "구분": "가까운 이웃"
-        })
+            text_item.set_fontsize(11)
 
-        query_plot_df = pd.DataFrame({
-            "주성분 1": [query_2d[0, 0]],
-            "주성분 2": [query_2d[0, 1]],
-            "상태": ["예측 대상"],
-            "구분": ["새로운 데이터"]
-        })
-
-        knn_background = px.scatter(
-            knn_plot_df,
-            x="주성분 1",
-            y="주성분 2",
-            color="상태",
-            color_discrete_map={
-                "정상": "#3984E8",
-                "고장": "#E45756"
-            },
-            opacity=0.25,
-            title="KNN의 가까운 이웃 예시 (PCA 2차원 표시)"
+        ax.set_title(
+            "의사결정트리의 기계 고장 판단 과정",
+            fontproperties=KOREAN_FONT,
+            fontsize=18,
+            pad=20
         )
 
-        for state, color in [("정상", "#1464C0"), ("고장", "#C92A2A")]:
-            subset = neighbor_plot_df[
-                neighbor_plot_df["상태"] == state
-            ]
-            if not subset.empty:
-                knn_background.add_scatter(
-                    x=subset["주성분 1"],
-                    y=subset["주성분 2"],
-                    mode="markers",
-                    name=f"가까운 이웃 - {state}",
-                    marker=dict(
-                        size=13,
-                        color=color,
-                        line=dict(width=2, color="white"),
-                        symbol="circle"
-                    )
-                )
+        plt.tight_layout()
 
-        knn_background.add_scatter(
-            x=query_plot_df["주성분 1"],
-            y=query_plot_df["주성분 2"],
-            mode="markers",
-            name="예측 대상",
-            marker=dict(
-                size=19,
-                color="#F2B134",
-                symbol="star",
-                line=dict(width=2, color="#333333")
-            )
-        )
-
-        knn_background.update_layout(
-            height=500,
-            template="plotly_white",
-            xaxis_title="주성분 1 (여러 변수의 요약)",
-            yaxis_title="주성분 2 (여러 변수의 요약)"
-        )
-
-        st.plotly_chart(
-            knn_background,
+        st.pyplot(
+            fig_tree,
             use_container_width=True
         )
 
-        neighbor_vote_df = pd.DataFrame({
-            "가까운 데이터": [
-                f"이웃 {i + 1}" for i in range(len(neighbor_indices))
-            ],
-            "실제 상태": pd.Series(neighbor_labels).map({
-                0: "정상",
-                1: "고장"
-            }).to_numpy(),
-            "거리": neighbor_distances
-        })
-
-        st.markdown("**선택된 평가 데이터 주변의 7개 이웃**")
-        st.dataframe(
-            neighbor_vote_df.round({"거리": 3}),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        normal_votes = int((neighbor_labels == 0).sum())
-        failure_votes = int((neighbor_labels == 1).sum())
-        predicted_label = "고장" if failure_votes > normal_votes else "정상"
-
-        st.info(
-            f"가까운 7개 데이터 중 정상은 {normal_votes}개, "
-            f"고장은 {failure_votes}개입니다. "
-            f"따라서 이 평가 데이터는 KNN에서 **{predicted_label}**으로 예측됩니다."
-        )
+        plt.close(fig_tree)
 
         st.caption(
-            "주의: 그래프는 전체 입력 변수를 PCA로 2차원에 요약한 시각화입니다. "
-            "실제 가까운 이웃 계산은 제품 유형과 5개 측정 변수를 모두 사용해 수행합니다."
+            "화면에는 이해하기 쉽도록 상위 2단계까지만 표시합니다. "
+            "실제 예측에는 최대 깊이 5로 학습한 모델을 사용합니다."
+        )
+
+        st.info(
+            "각 네모는 판단 조건을 의미합니다. "
+            "조건에 따라 왼쪽 또는 오른쪽으로 이동하며 "
+            "마지막 단계에서 정상 또는 고장으로 분류합니다."
         )
 
         # -------------------------------------------------
@@ -1639,19 +1549,19 @@ elif menu == "5. 모델 학습 및 평가":
             "모델": [
                 "로지스틱 회귀",
                 "랜덤 포레스트",
-                "K-최근접 이웃(KNN)"
+                "의사결정트리"
             ],
 
             "예측 방법": [
                 "변수의 계수로 고장 확률 계산",
                 "여러 나무의 예측 결과 결합",
-                "가까운 K개 데이터의 다수결"
+                "조건을 따라 단계별 분류"
             ],
 
             "그래프에서 확인할 내용": [
                 "변수별 계수와 방향",
                 "변수별 중요도",
-                "새 데이터와 가까운 기존 사례"
+                "정상·고장 판단 과정"
             ]
         })
 
