@@ -1,9 +1,12 @@
 
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
@@ -22,8 +25,40 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
+
 # =========================================================
-# 1. 기본 설정 및 데이터
+# 1. 한글 글꼴 설정
+# =========================================================
+
+font_paths = [
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"
+]
+
+font_found = False
+
+for font_path in font_paths:
+    if os.path.exists(font_path):
+        fm.fontManager.addfont(font_path)
+        font_name = fm.FontProperties(fname=font_path).get_name()
+        matplotlib.rcParams["font.family"] = font_name
+        font_found = True
+        break
+
+if not font_found:
+    # 로컬 컴퓨터에서 실행할 경우를 위한 대체 글꼴
+    matplotlib.rcParams["font.family"] = [
+        "Malgun Gothic",
+        "AppleGothic",
+        "NanumGothic",
+        "sans-serif"
+    ]
+
+matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+# =========================================================
+# 2. 기본 설정 및 데이터
 # =========================================================
 
 st.set_page_config(
@@ -67,12 +102,14 @@ NUMERIC = [
 
 TARGET = "기계 고장 여부"
 
+MODEL_FEATURES = ["제품 유형"] + NUMERIC
+
 
 @st.cache_data
 def load_data():
     errors = []
 
-    for encoding in ("utf-8-sig", "utf-8", "cp949"):
+    for encoding in ["utf-8-sig", "utf-8", "cp949"]:
         try:
             data = pd.read_csv(DATA_URL, encoding=encoding)
             return data.rename(columns=RENAME)
@@ -86,7 +123,7 @@ try:
     df = load_data()
 
 except Exception as exc:
-    st.error("데이터를 불러오지 못했습니다. GitHub 주소와 CSV 파일을 확인해 주세요.")
+    st.error("데이터를 불러오지 못했습니다.")
     st.code(str(exc))
     st.stop()
 
@@ -99,25 +136,23 @@ for col in NUMERIC + [TARGET]:
 required = ["제품 유형"] + NUMERIC + [TARGET]
 
 missing_columns = [
-    c for c in required if c not in df.columns
+    col for col in required if col not in df.columns
 ]
 
 if missing_columns:
-    st.error(f"데이터에서 필요한 열을 찾지 못했습니다: {missing_columns}")
+    st.error(f"필요한 열을 찾을 수 없습니다: {missing_columns}")
     st.stop()
 
 
 failure_df = df.dropna(subset=[TARGET]).copy()
 failure_df[TARGET] = failure_df[TARGET].astype(int)
-failure_df = failure_df[failure_df[TARGET].isin([0, 1])].copy()
-
-# 모델에는 제품 유형과 측정 변수만 사용
-# 고장 유형 변수는 정답과 직접 연결되어 있어 제외
-MODEL_FEATURES = ["제품 유형"] + NUMERIC
+failure_df = failure_df[
+    failure_df[TARGET].isin([0, 1])
+].copy()
 
 
 # =========================================================
-# 2. 모델 전처리 및 평가 함수
+# 3. 전처리 및 모델 평가 함수
 # =========================================================
 
 def make_preprocessor(model_kind):
@@ -146,33 +181,38 @@ def make_preprocessor(model_kind):
 def evaluate_model(model, X_train, X_test, y_train, y_test, name):
 
     model.fit(X_train, y_train)
-
-    pred = model.predict(X_test)
+    prediction = model.predict(X_test)
 
     cm = confusion_matrix(
         y_test,
-        pred,
+        prediction,
         labels=[0, 1]
     )
 
     metrics = {
         "모델": name,
-        "정확도": accuracy_score(y_test, pred) * 100,
-        "정밀도": precision_score(y_test, pred, zero_division=0) * 100,
-        "재현율": recall_score(y_test, pred, zero_division=0) * 100,
-        "F1 점수": f1_score(y_test, pred, zero_division=0) * 100
+        "정확도": accuracy_score(y_test, prediction) * 100,
+        "정밀도": precision_score(
+            y_test, prediction, zero_division=0
+        ) * 100,
+        "재현율": recall_score(
+            y_test, prediction, zero_division=0
+        ) * 100,
+        "F1 점수": f1_score(
+            y_test, prediction, zero_division=0
+        ) * 100
     }
 
     return {
         "model": model,
-        "prediction": pred,
+        "prediction": prediction,
         "metrics": metrics,
         "confusion": cm
     }
 
 
 # =========================================================
-# 3. 사이드바 및 공통 디자인
+# 4. 사이드바 및 기본 화면
 # =========================================================
 
 st.sidebar.title("⚙️ 메인 목차")
@@ -195,10 +235,16 @@ st.sidebar.subheader("📊 데이터 정보")
 
 st.sidebar.metric("전체 데이터", f"{len(df):,}개")
 st.sidebar.metric("전체 변수", f"{len(df.columns)}개")
-st.sidebar.metric("결측값", f"{int(df.isna().sum().sum()):,}개")
+st.sidebar.metric(
+    "결측값",
+    f"{int(df.isna().sum().sum()):,}개"
+)
 
 st.title("⚙️ 기계 고장 예측 분석실")
-st.caption("기계 작동 데이터를 그래프로 이해하고, 머신러닝으로 고장 여부를 예측합니다.")
+st.caption(
+    "기계 작동 데이터를 그래프로 이해하고 "
+    "머신러닝으로 고장 여부를 예측합니다."
+)
 
 
 # =========================================================
@@ -210,27 +256,31 @@ if menu == "🏠 홈":
     st.header("기계 고장 예측 프로젝트")
 
     st.write(
-        "공기 온도, 공정 온도, 회전 속도, 토크, 공구 마모 시간 등의 데이터를 분석해 "
-        "기계 고장과 관련된 특징을 찾고, 세 가지 머신러닝 모델로 고장 여부를 예측합니다."
+        "공기 온도, 공정 온도, 회전 속도, 토크, 공구 마모 시간 등의 "
+        "데이터를 분석해 기계 고장과 관련된 특징을 찾고, "
+        "세 가지 머신러닝 모델로 고장 여부를 예측합니다."
     )
 
     a, b, c = st.columns(3)
 
     a.metric("데이터 수", f"{len(df):,}개")
     b.metric("측정 변수", f"{len(NUMERIC)}개")
-    c.metric("고장 데이터", f"{int((failure_df[TARGET] == 1).sum()):,}개")
+    c.metric(
+        "고장 데이터",
+        f"{int((failure_df[TARGET] == 1).sum()):,}개"
+    )
 
     st.subheader("분석 순서")
 
     st.markdown("""
     1. **문제 정의** — 분석 주제와 목표 확인
     2. **핵심 데이터 분석** — 산포도와 선그래프로 고장 관련 패턴 찾기
-    3. **데이터 전처리** — 결측값과 분석에 사용할 변수 확인
-    4. **기준선 설정** — 가장 단순한 예측 방법의 성능 확인
+    3. **데이터 전처리** — 결측값과 분석 변수 확인
+    4. **기준선 설정** — 단순 예측 방법의 성능 확인
     5. **모델 학습 및 평가** — 세 가지 머신러닝 모델 비교
     """)
 
-    st.info("왼쪽 메뉴에서 항목을 선택하면 해당 분석만 볼 수 있습니다.")
+    st.info("왼쪽 메뉴에서 원하는 분석 항목을 선택하세요.")
 
 
 # =========================================================
@@ -244,15 +294,17 @@ elif menu == "1. 문제 정의":
     st.subheader("연구 주제")
 
     st.write(
-        "기계 고장과 관련된 요인은 무엇이며, 머신러닝으로 기계 고장을 예측할 수 있을까?"
+        "기계 고장과 관련된 요인은 무엇이며, "
+        "머신러닝으로 기계 고장을 예측할 수 있을까?"
     )
 
     st.subheader("주제 선정 이유")
 
     st.write(
-        "산업 현장에서 기계가 갑자기 고장 나면 생산이 중단되고 수리 비용이 발생할 수 있다. "
-        "기계의 작동 데이터를 분석하면 고장과 관련된 특징을 찾고, "
-        "고장을 미리 예측하는 데 도움을 줄 수 있다고 생각하여 이 주제를 선정하였다."
+        "산업 현장에서 기계가 갑자기 고장 나면 생산이 중단되고 "
+        "수리 비용이 발생할 수 있다. 기계의 작동 데이터를 분석하면 "
+        "고장과 관련된 특징을 찾고, 고장을 미리 예측하는 데 "
+        "도움을 줄 수 있다고 생각하여 이 주제를 선정하였다."
     )
 
     st.subheader("데이터셋 소개")
@@ -261,7 +313,7 @@ elif menu == "1. 문제 정의":
     - 데이터셋: AI4I 2020 기계 고장 예측 데이터
     - 데이터 수: 약 10,000개
     - 주요 변수: 공기 온도, 공정 온도, 회전 속도, 토크, 공구 마모 시간
-    - 예측 대상: 기계 고장 여부(0=정상, 1=고장)
+    - 예측 대상: 기계 고장 여부 (0=정상, 1=고장)
     """)
 
     st.subheader("변수의 뜻")
@@ -285,7 +337,11 @@ elif menu == "1. 문제 정의":
         ]
     })
 
-    st.dataframe(meanings, use_container_width=True, hide_index=True)
+    st.dataframe(
+        meanings,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # =========================================================
@@ -297,7 +353,7 @@ elif menu == "2. 핵심 데이터 분석":
     st.header("2️⃣ 핵심 데이터 분석")
 
     st.write(
-        "포스터에 활용하기 쉬운 그래프 3개로 기계 고장과 관련된 특징을 살펴봅니다."
+        "그래프를 통해 기계 고장과 관련된 데이터의 특징을 살펴봅니다."
     )
 
     normal_count = int((failure_df[TARGET] == 0).sum())
@@ -314,12 +370,11 @@ elif menu == "2. 핵심 데이터 분석":
 
     # 그래프 1: 산포도
 
-    st.subheader("그래프 1. 토크와 회전 속도의 관계 (산포도)")
+    st.subheader("그래프 1. 토크와 회전 속도의 관계")
 
     st.write(
         "점 하나가 기계 데이터 한 건을 뜻합니다. "
-        "파란색은 정상, 빨간색은 고장입니다. "
-        "고장 데이터가 어느 영역에 분포하는지 확인할 수 있습니다."
+        "파란색은 정상, 빨간색은 고장입니다."
     )
 
     scatter_data = failure_df[
@@ -327,7 +382,9 @@ elif menu == "2. 핵심 데이터 분석":
     ].dropna().copy()
 
     if len(scatter_data) > 3500:
-        scatter_data = scatter_data.sample(3500, random_state=42)
+        scatter_data = scatter_data.sample(
+            3500, random_state=42
+        )
 
     scatter_data["상태"] = scatter_data[TARGET].map({
         0: "정상",
@@ -351,25 +408,27 @@ elif menu == "2. 핵심 데이터 분석":
         height=470,
         template="plotly_white",
         xaxis_title="토크(N·m)",
-        yaxis_title="회전 속도(rpm)",
-        legend_title="기계 상태"
+        yaxis_title="회전 속도(rpm)"
     )
 
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(
+        fig_scatter,
+        use_container_width=True
+    )
 
     st.caption(
-        "해석 방법: 빨간 점이 특정 영역에 모이는지 확인합니다. "
-        "점의 분포만으로 고장의 직접적인 원인을 확정할 수는 없습니다."
+        "고장 데이터가 어느 영역에 분포하는지 확인할 수 있습니다. "
+        "점의 분포만으로 직접적인 고장 원인을 확정할 수는 없습니다."
     )
 
     st.divider()
 
     # 그래프 2: 선그래프
 
-    st.subheader("그래프 2. 공구 마모 시간에 따른 고장률 (선그래프)")
+    st.subheader("그래프 2. 공구 마모 시간에 따른 고장률")
 
     st.write(
-        "공구 마모 시간을 50분 단위 구간으로 나누고, "
+        "공구 마모 시간을 50분 단위로 나누고, "
         "각 구간에서 고장이 발생한 비율을 계산했습니다."
     )
 
@@ -436,10 +495,13 @@ elif menu == "2. 핵심 데이터 분석":
         yaxis_title="고장률(%)"
     )
 
-    st.plotly_chart(fig_line, use_container_width=True)
+    st.plotly_chart(
+        fig_line,
+        use_container_width=True
+    )
 
     st.caption(
-        "해석 방법: 선의 높이는 각 사용 시간 구간의 고장률입니다. "
+        "선의 높이는 각 사용 시간 구간의 고장률입니다. "
         "구간별 데이터 수가 다를 수 있으므로 함께 확인해야 합니다."
     )
 
@@ -451,7 +513,9 @@ elif menu == "2. 핵심 데이터 분석":
             "고장_수": "고장 기계 수"
         }).copy()
 
-        show_wear["고장률(%)"] = show_wear["고장률(%)"].round(2)
+        show_wear["고장률(%)"] = (
+            show_wear["고장률(%)"].round(2)
+        )
 
         st.dataframe(
             show_wear,
@@ -463,12 +527,11 @@ elif menu == "2. 핵심 데이터 분석":
 
     # 그래프 3: 상관관계
 
-    st.subheader("그래프 3. 고장 여부와 관련된 변수의 상관관계")
+    st.subheader("그래프 3. 고장 여부와 측정 변수의 상관관계")
 
     st.write(
-        "막대가 오른쪽으로 길수록 고장 여부와 양의 상관관계가 크고, "
-        "왼쪽으로 길수록 음의 상관관계가 큽니다. "
-        "0에 가까우면 선형 상관관계가 약합니다."
+        "상관계수는 두 변수 사이의 선형적인 관련성을 나타냅니다. "
+        "0에 가까울수록 선형 상관관계가 약합니다."
     )
 
     corr = (
@@ -501,14 +564,21 @@ elif menu == "2. 핵심 데이터 분석":
         yaxis_title="측정 변수"
     )
 
-    st.plotly_chart(fig_corr, use_container_width=True)
+    st.plotly_chart(
+        fig_corr,
+        use_container_width=True
+    )
 
     strongest = corr.abs().idxmax()
 
     st.info(
-        f"고장 여부와 절댓값 기준 상관관계가 가장 큰 측정 변수는 "
-        f"**{strongest}**입니다. (상관계수 {corr[strongest]:.3f}) "
-        "상관관계는 관련성을 나타내며 직접적인 원인이라는 뜻은 아닙니다."
+        f"고장 여부와 절댓값 기준 상관관계가 가장 큰 변수는 "
+        f"**{strongest}**입니다. "
+        f"(상관계수 {corr[strongest]:.3f})"
+    )
+
+    st.caption(
+        "상관관계는 관련성을 나타내며, 직접적인 원인이라는 뜻은 아닙니다."
     )
 
 
@@ -525,10 +595,10 @@ elif menu == "3. 데이터 전처리":
     st.markdown("""
     - 영어 변수명을 이해하기 쉬운 한국어로 변경했습니다.
     - 측정값과 고장 여부를 숫자형으로 변환했습니다.
-    - 모델 입력 변수로 제품 유형과 5개 측정 변수를 사용합니다.
+    - 제품 유형과 5개 측정 변수를 모델 입력값으로 사용합니다.
     - 제품 번호와 데이터 번호는 식별자이므로 모델에서 제외합니다.
     - TWF, HDF, PWF, OSF, RNF는 고장 유형을 나타내며 정답과 직접 연결된 정보이므로 예측 입력에서 제외합니다.
-    - 모델 학습 과정에서 결측값은 중앙값(수치형) 또는 최빈값(범주형)으로 처리합니다.
+    - 모델 학습 과정에서 결측값은 중앙값 또는 최빈값으로 처리합니다.
     - 로지스틱 회귀의 수치형 변수는 표준화합니다.
     """)
 
@@ -543,18 +613,26 @@ elif menu == "3. 데이터 전처리":
         .reset_index(name="결측값 수")
     )
 
-    missing = missing[missing["결측값 수"] > 0]
+    missing = missing[
+        missing["결측값 수"] > 0
+    ]
 
     if missing.empty:
         st.success("현재 데이터에는 결측값이 없습니다.")
     else:
-        st.dataframe(missing, use_container_width=True, hide_index=True)
+        st.dataframe(
+            missing,
+            use_container_width=True,
+            hide_index=True
+        )
 
     st.subheader("데이터 구성")
 
     st.write(f"- 전체 행: {len(df):,}개")
     st.write(f"- 전체 열: {len(df.columns)}개")
-    st.write(f"- 모델 입력 변수: {', '.join(MODEL_FEATURES)}")
+    st.write(
+        f"- 모델 입력 변수: {', '.join(MODEL_FEATURES)}"
+    )
 
     st.dataframe(
         df[MODEL_FEATURES + [TARGET]].head(8),
@@ -586,12 +664,16 @@ elif menu == "4. 기준선 설정":
         stratify=y
     )
 
-    baseline = DummyClassifier(strategy="most_frequent")
-    baseline.fit(X_train, y_train)
+    baseline = DummyClassifier(
+        strategy="most_frequent"
+    )
 
+    baseline.fit(X_train, y_train)
     baseline_pred = baseline.predict(X_test)
 
-    base_acc = accuracy_score(y_test, baseline_pred) * 100
+    base_acc = accuracy_score(
+        y_test, baseline_pred
+    ) * 100
 
     normal_n = int((y == 0).sum())
     failure_n = int((y == 1).sum())
@@ -610,10 +692,9 @@ elif menu == "4. 기준선 설정":
     )
 
     st.info(
-        f"기준선은 평가 데이터의 모든 기계를 다수 클래스인 "
-        f"**{'정상' if normal_n >= failure_n else '고장'}**으로 예측합니다. "
-        f"따라서 기준선 정확도는 {base_acc:.2f}%입니다. "
-        "고장 데이터를 얼마나 찾아냈는지는 별도로 확인해야 합니다."
+        f"기준선은 모든 기계를 다수 클래스인 "
+        f"{'정상' if normal_n >= failure_n else '고장'}으로 예측합니다. "
+        f"기준선 정확도는 {base_acc:.2f}%입니다."
     )
 
 
@@ -626,8 +707,7 @@ elif menu == "5. 모델 학습 및 평가":
     st.header("5️⃣ 모델 학습 및 평가")
 
     st.write(
-        "같은 학습용·평가용 데이터로 세 모델을 학습하여 공정하게 비교합니다. "
-        "기본 분할 비율은 학습 70%, 평가 30%입니다."
+        "같은 학습용·평가용 데이터로 세 모델을 학습하여 비교합니다."
     )
 
     st.subheader("세 모델의 예측 방식")
@@ -664,11 +744,14 @@ elif menu == "5. 모델 학습 및 평가":
     )
 
     st.caption(
-        f"현재 설정: 학습용 {100-test_size*100:.0f}% / "
+        f"학습용 {100-test_size*100:.0f}% / "
         f"평가용 {test_size*100:.0f}%"
     )
 
-    if st.button("세 모델 학습 및 비교하기", type="primary"):
+    if st.button(
+        "세 모델 학습 및 비교하기",
+        type="primary"
+    ):
 
         X = failure_df[MODEL_FEATURES].copy()
         y = failure_df[TARGET].astype(int)
@@ -684,6 +767,7 @@ elif menu == "5. 모델 학습 및 평가":
             )
 
             # 로지스틱 회귀
+
             logistic = Pipeline([
                 ("preprocessor", make_preprocessor("logistic")),
                 ("classifier", LogisticRegression(
@@ -694,6 +778,7 @@ elif menu == "5. 모델 학습 및 평가":
             ])
 
             # 랜덤 포레스트
+
             forest = Pipeline([
                 ("preprocessor", make_preprocessor("forest")),
                 ("classifier", RandomForestClassifier(
@@ -705,6 +790,7 @@ elif menu == "5. 모델 학습 및 평가":
             ])
 
             # 의사결정트리
+
             tree = Pipeline([
                 ("preprocessor", make_preprocessor("forest")),
                 ("classifier", DecisionTreeClassifier(
@@ -714,7 +800,9 @@ elif menu == "5. 모델 학습 및 평가":
                 ))
             ])
 
-            with st.spinner("세 모델을 학습하고 평가하고 있습니다..."):
+            with st.spinner(
+                "세 모델을 학습하고 평가하고 있습니다..."
+            ):
 
                 logistic_result = evaluate_model(
                     logistic,
@@ -743,10 +831,14 @@ elif menu == "5. 모델 학습 및 평가":
                 "test_size": test_size
             }
 
-            st.success("세 모델의 학습과 평가가 완료되었습니다.")
+            st.success(
+                "세 모델의 학습과 평가가 완료되었습니다."
+            )
 
         except Exception as exc:
-            st.error(f"모델 학습 중 문제가 발생했습니다: {exc}")
+            st.error(
+                f"모델 학습 중 문제가 발생했습니다: {exc}"
+            )
 
     results = st.session_state.get("model_results")
 
@@ -793,7 +885,7 @@ elif menu == "5. 모델 학습 및 평가":
             color="모델",
             barmode="group",
             text_auto=".1f",
-            title="로지스틱 회귀 · 랜덤 포레스트 · 의사결정트리"
+            title="세 가지 머신러닝 모델의 성능 비교"
         )
 
         fig_metrics.update_layout(
@@ -804,7 +896,10 @@ elif menu == "5. 모델 학습 및 평가":
             yaxis_range=[0, 100]
         )
 
-        st.plotly_chart(fig_metrics, use_container_width=True)
+        st.plotly_chart(
+            fig_metrics,
+            use_container_width=True
+        )
 
         st.caption(
             "정확도: 전체 예측 중 맞힌 비율 / "
@@ -828,7 +923,9 @@ elif menu == "5. 모델 학습 및 평가":
             ("tree", "의사결정트리")
         ]
 
-        for col, (key, title) in zip(cm_columns, model_list):
+        for col, (key, title) in zip(
+            cm_columns, model_list
+        ):
 
             cm = results[key]["confusion"]
 
@@ -867,24 +964,41 @@ elif menu == "5. 모델 학습 및 평가":
         forest_model = results["forest"]["model"]
         tree_model = results["tree"]["model"]
 
-        forest_preprocessor = forest_model.named_steps["preprocessor"]
-        tree_preprocessor = tree_model.named_steps["preprocessor"]
+        forest_preprocessor = (
+            forest_model.named_steps["preprocessor"]
+        )
 
-        forest_classifier = forest_model.named_steps["classifier"]
-        tree_classifier = tree_model.named_steps["classifier"]
+        tree_preprocessor = (
+            tree_model.named_steps["preprocessor"]
+        )
 
-        feature_names = forest_preprocessor.get_feature_names_out()
+        forest_classifier = (
+            forest_model.named_steps["classifier"]
+        )
+
+        tree_classifier = (
+            tree_model.named_steps["classifier"]
+        )
+
+        feature_names = (
+            forest_preprocessor.get_feature_names_out()
+        )
 
         importance_df = pd.DataFrame({
             "변수": feature_names,
-            "랜덤 포레스트": forest_classifier.feature_importances_,
-            "의사결정트리": tree_classifier.feature_importances_
+            "랜덤 포레스트": (
+                forest_classifier.feature_importances_
+            ),
+            "의사결정트리": (
+                tree_classifier.feature_importances_
+            )
         })
 
         importance_df["변수"] = (
             importance_df["변수"]
             .str.replace("category__", "", regex=False)
             .str.replace("numeric__", "", regex=False)
+            .str.replace("제품 유형_", "제품 유형: ", regex=False)
         )
 
         importance_long = importance_df.melt(
@@ -900,7 +1014,7 @@ elif menu == "5. 모델 학습 및 평가":
             color="모델",
             barmode="group",
             orientation="h",
-            title="랜덤 포레스트와 의사결정트리의 변수 중요도"
+            title="두 모델의 변수 중요도 비교"
         )
 
         fig_importance.update_layout(
@@ -916,12 +1030,12 @@ elif menu == "5. 모델 학습 및 평가":
         )
 
         st.caption(
-            "변수 중요도는 각 모델이 예측할 때 변수를 얼마나 활용했는지 나타냅니다. "
+            "변수 중요도는 예측 과정에서 변수가 얼마나 활용되었는지 나타냅니다. "
             "실제 고장의 원인이나 영향의 방향을 직접 증명하는 값은 아닙니다."
         )
 
         # -------------------------------------------------
-        # 의사결정트리 시각화
+        # 의사결정트리 시각화 - 한글 글꼴 적용
         # -------------------------------------------------
 
         st.divider()
@@ -932,26 +1046,54 @@ elif menu == "5. 모델 학습 및 평가":
             "정상 또는 고장을 분류하는지 그림으로 확인할 수 있습니다."
         )
 
-        tree_classifier = tree_model.named_steps["classifier"]
+        tree_feature_names = (
+            tree_preprocessor.get_feature_names_out()
+        )
 
-        tree_feature_names = tree_preprocessor.get_feature_names_out()
+        display_feature_names = []
 
-        fig, ax = plt.subplots(figsize=(20, 9))
+        for name in tree_feature_names:
+
+            name = name.replace("numeric__", "")
+            name = name.replace("category__", "")
+            name = name.replace(
+                "제품 유형_", "제품 유형: "
+            )
+
+            display_feature_names.append(name)
+
+        # 그래프 크기 확대
+        fig, ax = plt.subplots(
+            figsize=(24, 12),
+            dpi=130
+        )
 
         plot_tree(
             tree_classifier,
-            feature_names=tree_feature_names,
+            feature_names=display_feature_names,
             class_names=["정상", "고장"],
             filled=True,
             rounded=True,
             max_depth=3,
-            fontsize=8,
+            fontsize=10,
+            proportion=False,
+            impurity=True,
             ax=ax
         )
 
-        ax.set_title("의사결정트리 분류 과정", fontsize=16)
+        ax.set_title(
+            "의사결정트리의 기계 고장 분류 과정",
+            fontsize=20,
+            pad=20
+        )
 
-        st.pyplot(fig)
+        plt.tight_layout()
+
+        st.pyplot(
+            fig,
+            use_container_width=True
+        )
+
         plt.close(fig)
 
         st.caption(
@@ -960,7 +1102,7 @@ elif menu == "5. 모델 학습 및 평가":
         )
 
         # -------------------------------------------------
-        # 모델 결과 해석
+        # 결과 해석
         # -------------------------------------------------
 
         st.divider()
